@@ -118,7 +118,7 @@ tm_qpcr_plot <- qPCR_data %>%
 my_comparisons <- list( c("TM-", "TM+ 8hr"), c("TM-", "TM+ 1hr"), c("TM-", "TM+ 2hr"),c("TM-", "TM+ 4hr") )
 
 tm_qpcr_plot 
-ggsave(plot = tm_qpcr_plot, filename = paste(results_dir, "Figure_1A.png", sep = ""), width = 14, height = 3, device = "png", dpi = 700)
+ggsave(plot = tm_qpcr_plot, filename = paste(results_dir, "Figure 1A.png", sep = ""), width = 14, height = 3, device = "png", dpi = 700)
 ```
 # Single cell RNA-seq
 ## load genelists
@@ -133,7 +133,6 @@ mito <- c(
   "COX3", "ND3", "ND4L", "ND4", "ND5", "ND6", "CYTB"
 )
 ```
-
 
 ## Set filtering thresholds
 here we set values for different criteria using in the analysis
@@ -308,6 +307,7 @@ figure_1c <- seurat_cluster_plot$data %>%
   guides(color = guide_legend(override.aes = list(size = 2)))
 figure_1c
 
+figure_1c
 ggsave(plot = figure_1c, filename = paste(results_dir, "Figure_1C.png", sep = ""), width = 5, height = 4, device = "png", dpi = 700)
 ```
 # Integrate the cells and SBO tags
@@ -478,7 +478,9 @@ figure_2d <- sbo_combined_tsne_plot$data %>%
   theme_bw() +
   scale_color_manual(values=c("red","#fde725","#5ec962","#21918c","#31688e","#440154")) +
   labs(x="tSNE 1", y = "tSNE 2", color= "Sample [barcode]", title="Combined SBO library 1 & 2") +
-  guides(color = guide_legend(override.aes = list(size = 2))) 
+  guides(color = guide_legend(override.aes = list(size = 2)))
+
+figure_2d 
 ggsave(plot = figure_2d, filename = paste(results_dir, "Figure_2D.png", sep = ""), width = 5, height = 3.5, device = "png", dpi = 700)
 ```
 
@@ -535,6 +537,7 @@ ridge_plot_merged <- ridge_data  %>%
   facet_wrap(~tag, nrow=1) +
   theme(legend.position="none")
 
+ridge_plot_merged
 ggsave(plot = ridge_plot_merged, filename = paste(results_dir, "Figure_2D.png", sep = ""), width = 12, height = 4, device = "png", dpi = 700)
 ```
 
@@ -977,13 +980,10 @@ pcg_with_loc_ids <- pcg_with_loc_ids %>%
   ) %>%
   select(symbol, GeneSymbol, c(colnames(geneInfo_annotated)))
 
-
-
 geneInfo_annotated <- bind_rows(pcg_without_loc_ids, pcg_with_loc_ids) 
 
-
 # save info
-write.csv(geneInfo_annotated,file=paste0('geneInfoSigned.csv'))
+write.csv(geneInfo_annotated,file=paste0(results_dir,'WGCNA_geneInfo_signed.csv'))
 ```
 
 ## relationship between coexpressed modules and TM
