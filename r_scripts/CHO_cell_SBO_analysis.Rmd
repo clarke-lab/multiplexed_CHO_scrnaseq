@@ -319,34 +319,34 @@ Here we analyse the cell data independently of the SBOs.
 ### Merge cell libraries 1 & 2
 ```{r warning=FALSE}
 # merge the filtered cells from lib1 and lib2
-combined_cells_notag <- merge(
+merged_cell_obj <- merge(
   cell_library_1,
   y = c(cell_library_2),
   add.cell.ids = c("library1", "library2"),
   project = "cho_sbo"
 )
 
-combined_cells_notag
+merged_cell_obj
 ```
 
 ### Cell cycle correction and SCT
 ```{r warning=FALSE, include=FALSE}
-cho.combined.notag.sct <- SCTransform(
-  combined_cells_notag,
+merged_cell_obj <- SCTransform(
+  merged_cell_obj,
   assay = "RNA",
   new.assay.name = "SCT",
   vars.to.regress = c('nCount_RNA',"percent.mt")
 )
 
-cho.combined.notag.sct <- CellCycleScoring(cho.combined.notag.sct,
+merged_cell_obj <- CellCycleScoring(merged_cell_obj,
   assay = "SCT",
   s.features = cgr_s_phase,
   g2m.features = cgr_g2m_phase,
   set.ident = TRUE
 )
 
-cho.combined.notag.sct <- SCTransform(
-  cho.combined.notag.sct,
+merged_cell_obj <- SCTransform(
+  merged_cell_obj,
   assay = "RNA",
   new.assay.name = "SCT",
   vars.to.regress = c("S.Score", "G2M.Score",'nCount_RNA', "percent.mt"),
@@ -358,20 +358,20 @@ cho.combined.notag.sct <- SCTransform(
 
 ```{r fig.height=5, fig.width=8}
 # Dimensionality reduction and clustering
-cho.combined.notag.sct <- RunPCA(object = cho.combined.notag.sct, verbose = FALSE)
-cho.combined.notag.sct  <- FindNeighbors(cho.combined.notag.sct , dims = 1:9)
-cho.combined.notag.sct  <- FindClusters(cho.combined.notag.sct , resolution = 0.5)
-cho.combined.notag.sct <- RunUMAP(object = cho.combined.notag.sct, dims = 1:25)
+merged_cell_obj <- RunPCA(object = merged_cell_obj, verbose = FALSE)
+merged_cell_obj  <- FindNeighbors(merged_cell_obj , dims = 1:9)
+merged_cell_obj  <- FindClusters(merged_cell_obj , resolution = 0.5)
+merged_cell_obj <- RunUMAP(object = merged_cell_obj, dims = 1:25)
 ```
 
 ### Supplementary Figure 2
 ```{r fig.height=5, fig.width=8}
 # overlay clusters
-seurat_cluster_plot <- DimPlot(cho.combined.notag.sct, reduction = "umap", group.by = c("seurat_clusters"),pt.size = 0.5) 
+seurat_cluster_plot <- DimPlot(merged_cell_obj, reduction = "umap", group.by = c("seurat_clusters"),pt.size = 0.5) 
 # overlay library
-seurat_cluster_plot_lib <- DimPlot(cho.combined.notag.sct, reduction = "umap", group.by = c("library"),pt.size = 0.5) 
+seurat_cluster_plot_lib <- DimPlot(merged_cell_obj, reduction = "umap", group.by = c("library"),pt.size = 0.5) 
 # overlay cell cycle phase
-seurat_cluster_plot_cc <- DimPlot(cho.combined.notag.sct, reduction = "umap", group.by = c("Phase"),pt.size = 0.5)
+seurat_cluster_plot_cc <- DimPlot(merged_cell_obj, reduction = "umap", group.by = c("Phase"),pt.size = 0.5)
 
 cbp1 <- c("#E69F00", "#009E73",
           "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
@@ -447,7 +447,9 @@ sbo_lib_1.data <- readRDS("~/Documents/sbo_scrnaseq_analysis/results/r_scripts/s
 
 
 tagged_cells_seurat_matrix1 <- as.matrix(GetAssayData(object = cell_library_1, slot = "counts"))
+
 cho_lib1_joint.bcs <- intersect(colnames(sbo_lib_1.data), colnames(tagged_cells_seurat_matrix1))
+
 cho_lib_1.umis <- tagged_cells_seurat_matrix1[, cho_lib1_joint.bcs]
 
 
@@ -459,15 +461,17 @@ cho_1.hashtag <- CreateSeuratObject(
 )
 
 cho_1.hashtag[["percent.mt"]] <- cell_library_1$percent.mt
+
 keep <- c(!rownames(cho_1.hashtag) %in% mito)
+
 cho_1.hashtag <- subset(x = cho_1.hashtag, features = c(1:(dim(cho_1.hashtag)[1]))[keep])
 
-# eliminate cells based on number of umis, genes and % mtdna
-count_high <- quantile(cho_1.hashtag@meta.data$nCount_RNA, rna_count_quantile_high)
-count_low <- quantile(cho_1.hashtag@meta.data$nCount_RNA, rna_count_quantile_low)
-cell_library_1 <- subset(cho_1.hashtag, subset = nFeature_RNA > 6000 & nFeature_RNA < 9000 &
-  nCount_RNA < count_high & nCount_RNA > count_low &
-  percent.mt < mt_threshold)
+# # eliminate cells based on number of umis, genes and % mtdna
+# count_high <- quantile(cho_1.hashtag@meta.data$nCount_RNA, rna_count_quantile_high)
+# count_low <- quantile(cho_1.hashtag@meta.data$nCount_RNA, rna_count_quantile_low)
+# cell_library_1 <- subset(cho_1.hashtag, subset = nFeature_RNA > 6000 & nFeature_RNA < 9000 &
+#   nCount_RNA < count_high & nCount_RNA > count_low &
+#   percent.mt < mt_threshold)
 
 cho_1.hashtag@meta.data$library <- rep("library 1", dim(cho_1.hashtag)[2])
 
@@ -515,7 +519,6 @@ ggsave(plot = figure_2c, filename = paste(results_dir, "Figure_2C.png", sep = ""
 Idents(cho_1.hashtag) <- "SBO_classification.global"
 cho_1.singlet <- subset(cho_1.hashtag, idents = "Singlet")
 # HTOHeatmap(cho_1.singlet, assay = "SBO",ncells = 1000,) + scale_fill_viridis_b()
-VlnPlot(cho_1.singlet, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3) & theme_bw()
 # cho_1.singlet <- subset(cho_1.singlet, subset = nFeature_RNA > 6000 & nFeature_RNA < 9000 & percent.mt < 10)
 ```
 ## Cell library 2
