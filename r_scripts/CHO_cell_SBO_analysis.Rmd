@@ -467,13 +467,22 @@ figure_s2d
 ```
 
 # Integrate the cells and SBO tags
-## Cell library 1
-### Integrate
-```{r message=FALSE, warning=FALSE, include=FALSE}
+
+### Import SBO libaries 
+```{r}
 # import the SBO data from CITE-seq count
 # sbo_lib_1.data <- Read10X(data.dir = "../../CITE-seq_counts/SBO_library_1/SBO_library_1_counts/umi_count/",gene.column = 1)
 # sbo_lib_1.data <- sbo_lib_1.data[-6,]
 
+# sbo_lib_2.data <- Read10X(data.dir = "../../CITE-seq_counts/SBO_library_2/SBO_library_2_counts/umi_count/",gene.column = 1)
+# sbo_lib_2.data <- sbo_lib_2.data[-6,]
+
+```
+
+
+## Cell library 1
+### Integrate
+```{r message=FALSE, warning=FALSE, include=FALSE}
 sbo_lib_1.data <- readRDS("~/Documents/sbo_scrnaseq_analysis/results/r_scripts/sbo_lib_1.data.rds")
 
 tagged_cells_seurat_matrix1 <- as.matrix(GetAssayData(object = cell_library_1, 
@@ -509,7 +518,7 @@ cho_lib_1_sbo <- as.matrix(sbo_lib_1.data[, cho_lib1_joint_bcs]) # intersect
 cho_cell_sbo_lib_1[["SBO"]] <- CreateAssayObject(counts = cho_lib_1_sbo)
 ```
 
-### Classify cells using SBOs
+### Classify
 ```{r}
 # normalise
 cho_cell_sbo_lib_1 <- NormalizeData(cho_cell_sbo_lib_1, assay = "SBO", 
@@ -533,10 +542,6 @@ cho_cell_sbo_lib_1.subset <- subset(cho_cell_sbo_lib_1, idents = "Negative", inv
 ## Cell library 2
 ### Integrate
 ```{r message=FALSE, warning=FALSE, include=FALSE}
-# import the SBO data from CITE-seq count
-# sbo_lib_2.data <- Read10X(data.dir = "../../CITE-seq_counts/SBO_library_2/SBO_library_2_counts/umi_count/",gene.column = 1)
-# sbo_lib_2.data <- sbo_lib_2.data[-6,]
-
 sbo_lib_2.data <- readRDS("~/Documents/sbo_scrnaseq_analysis/results/r_scripts/sbo_lib_2.data.rds")
 
 tagged_cells_seurat_matrix2 <- as.matrix(GetAssayData(object = cell_library_2, 
@@ -572,7 +577,7 @@ cho_lib_2_sbo <- as.matrix(sbo_lib_2.data[, cho_lib2_joint_bcs]) # intersect
 cho_cell_sbo_lib_2[["SBO"]] <- CreateAssayObject(counts = cho_lib_2_sbo)
 ```
 
-### Classify cells using SBOs
+### Classify
 ```{r}
 # normalise
 cho_cell_sbo_lib_2 <- NormalizeData(cho_cell_sbo_lib_2, assay = "SBO", 
@@ -593,7 +598,7 @@ classification_library_2 <- data.frame(table(cho_cell_sbo_lib_2$SBO_maxID, cho_c
 cho_cell_sbo_lib_2.subset <- subset(cho_cell_sbo_lib_2, idents = "Negative", invert = T)
 ```
 
-## Combine classified cell libraries
+## Combine cell library 1 & 2
 ```{r message=FALSE, warning=FALSE}
 # merge non-negative cells
 cho.combined.sbo <- merge(cho_cell_sbo_lib_1.subset,
