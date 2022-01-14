@@ -52,19 +52,20 @@ tm_qpcr_plot <- qpcr_data %>%
     position = position_jitter(width = 0), size = 0.2, color = "grey"
   ) +
   labs(x = "", y = "Fold change") +
-  facet_wrap(~name, scales = "free_y", nrow = 2, ) +
+  facet_wrap(~name, scales = "free_y", nrow = 1) +
   theme_bw() +
   theme(
     legend.position = "none",
     strip.text.x = element_text(face = "bold.italic"),
     strip.background = element_blank(),
     panel.spacing = unit(1, "lines"),
+    axis.text.x = element_text(angle = 35, vjust = 1, hjust = 1)
   ) +
   # axis.text.x = element_text(angle=35, hjust=1, size = 8)) +
   scale_y_continuous(breaks = pretty_breaks(n = 4, min.n = 0))
 
 tm_qpcr_plot
-ggsave(plot = tm_qpcr_plot, filename = paste(results_dir, "Figure 1A.png", sep = ""), width = 4.2, height = 4, device = "png", dpi = 700)
+ggsave(plot = tm_qpcr_plot, filename = paste(results_dir, "Figure 1A.png", sep = ""), width = 7, height = 2, device = "png", dpi = 700)
 ```
 # Single cell RNA-seq analysis
 ## Preparation
@@ -186,6 +187,12 @@ mito <- c(
 cell_library_1 <- readRDS("~/Documents/sbo_scrnaseq_analysis/results/r_scripts/tagged_cells_lib1.rds")
 
 cell_library_1
+
+
+count.max.lib1 <- round(mean(cell_library_1$nCount_RNA) + 2 * sd(cell_library_1$nCount_RNA), digits = -2)
+count.min.lib1 <- round(mean(cell_library_1$nCount_RNA) - 2 * sd(cell_library_1$nCount_RNA), digits = -2)
+feat.max.lib1 <- round(mean(cell_library_1$nFeature_RNA) + 2 * sd(cell_library_1$nFeature_RNA), digits = -2)
+feat.min.lib1 <- round(mean(cell_library_1$nFeature_RNA) - 2 * sd(cell_library_1$nFeature_RNA), digits = -2)
 ```
 
 ### Preprocess
@@ -217,10 +224,10 @@ cell_library_1_meta_data <- cell_library_1@meta.data %>%
   mutate(library = "Cell library 1")
 
 cell_library_1 <- subset(cell_library_1,
-  subset = nFeature_RNA > genes_detected_lower &
-    nFeature_RNA < genes_detected_upper &
-    nCount_RNA > count_low &
-    nCount_RNA < count_high &
+  subset = nFeature_RNA > feat.min.lib1  &
+    nFeature_RNA < feat.max.lib1  &
+    nCount_RNA > count.min.lib1 &
+    nCount_RNA < count.max.lib1 &
     percent.mt < mt_threshold
 )
 
@@ -254,6 +261,11 @@ cell_library_1
 cell_library_2 <- readRDS("~/Documents/sbo_scrnaseq_analysis/results/r_scripts/tagged_cells_lib2.rds")
 
 cell_library_2
+
+count.max.lib2 <- round(mean(cell_library_2$nCount_RNA) + 2 * sd(cell_library_2$nCount_RNA), digits = -2)
+count.min.lib2 <- round(mean(cell_library_2$nCount_RNA) - 2 * sd(cell_library_2$nCount_RNA), digits = -2)
+feat.max.lib2 <- round(mean(cell_library_2$nFeature_RNA) + 2 * sd(cell_library_2$nFeature_RNA), digits = -2)
+feat.min.lib2 <- round(mean(cell_library_2$nFeature_RNA) - 2 * sd(cell_library_2$nFeature_RNA), digits = -2)
 ```
 
 ### Preprocess
@@ -285,10 +297,10 @@ cell_library_2_meta_data <- cell_library_2@meta.data %>%
   mutate(library = "Cell library 2")
 
 cell_library_2 <- subset(cell_library_2,
-  subset = nFeature_RNA > genes_detected_lower &
-    nFeature_RNA < genes_detected_upper &
-    nCount_RNA > count_low &
-    nCount_RNA < count_high &
+  subset = nFeature_RNA > feat.min.lib2  &
+    nFeature_RNA < feat.max.lib2  &
+    nCount_RNA > count.min.lib2 &
+    nCount_RNA < count.max.lib2 &
     percent.mt < mt_threshold
 )
 
@@ -318,7 +330,7 @@ preprocessing_violin <- bind_rows(cell_library_1_meta_data, cell_library_2_meta_
   geom_hline(data = threshold_line_values, aes(yintercept = c(upper)), linetype = 11, size = 0.3)
 
 preprocessing_violin
-ggsave(plot = preprocessing_violin, filename = paste(results_dir, "Figure S1.png", sep = ""), width = 9, height = 7, device = "png", dpi = 700)
+ggsave(plot = preprocessing_violin, filename = paste(results_dir, "Figure S1.png", sep = ""), width = 7, height = 5, device = "png", dpi = 700)
 ```
 
 
@@ -327,7 +339,7 @@ ggsave(plot = preprocessing_violin, filename = paste(results_dir, "Figure S1.png
 Here we analyse the cell data independently of the SBOs. 
 
 ### Merge cell libraries 1 & 2
-```{r warning=FALSE}
+```{r eval=FALSE, warning=FALSE, include=FALSE}
 # merge the filtered cells from lib1 and lib2
 merged_cell_obj <- merge(
   cell_library_1,
@@ -340,7 +352,7 @@ merged_cell_obj
 ```
 
 ### Cell cycle correction and SCT
-```{r warning=FALSE, include=FALSE}
+```{r eval=FALSE, warning=FALSE, include=FALSE}
 merged_cell_obj <- SCTransform(
   merged_cell_obj,
   assay = "RNA",
@@ -366,7 +378,7 @@ merged_cell_obj <- SCTransform(
 
 ### Dimensionality reduction and clustering
 
-```{r fig.height=5, fig.width=8}
+```{r eval=FALSE, fig.height=5, fig.width=8, include=FALSE}
 merged_cell_obj <- RunPCA(object = merged_cell_obj, 
                           verbose = FALSE)
 
@@ -383,88 +395,7 @@ merged_cell_obj <- RunUMAP(object = merged_cell_obj,
                            dims = 1:16)
 ```
 
-### Supplementary Figure 2
-```{r fig.height=5, fig.width=8}
-# overlay clusters
-seurat_cluster_plot <- DimPlot(merged_cell_obj, reduction = "umap", group.by = c("seurat_clusters"), pt.size = 0.5)
-# overlay library
-seurat_cluster_plot_lib <- DimPlot(merged_cell_obj, reduction = "umap", group.by = c("library"), pt.size = 0.5)
-# overlay cell cycle phase
-seurat_cluster_plot_cc <- DimPlot(merged_cell_obj, reduction = "umap", group.by = c("Phase"), pt.size = 0.5)
 
-cbp1 <- c(
-  "#E69F00", "#009E73",
-  "#F0E442", "#0072B2", "#D55E00", "#CC79A7"
-)
-
-figure_s2a <- seurat_cluster_plot_lib$data %>%
-  ggplot(aes(x = UMAP_1, y = UMAP_2, color = library)) +
-  geom_point(size = 0.1) +
-  theme_bw() +
-  scale_color_manual(values = cbp1) +
-  labs(x = "UMAP 1", y = "UMAP 2", color = "Source") +
-  theme(
-    axis.ticks.x = element_blank(),
-    axis.text.x = element_blank(),
-    axis.ticks.y = element_blank(),
-    axis.text.y = element_blank(),
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank()
-  ) +
-  guides(color = guide_legend(override.aes = list(size = 2)))
-
-figure_s2b <- seurat_cluster_plot_cc$data %>%
-  ggplot(aes(x = UMAP_1, y = UMAP_2, color = Phase)) +
-  geom_point(size = 0.1) +
-  theme_bw() +
-  # scale_color_manual(values = cbp1) +
-  labs(x = "UMAP 1", y = "UMAP 2", color = "Phase") +
-  theme(
-    axis.ticks.x = element_blank(),
-    axis.text.x = element_blank(),
-    axis.ticks.y = element_blank(),
-    axis.text.y = element_blank(),
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank()
-  ) +
-  guides(color = guide_legend(override.aes = list(size = 2)))
-
-figure_s2c <- seurat_cluster_plot$data %>%
-  ggplot(aes(x = UMAP_1, y = UMAP_2, color = seurat_clusters)) +
-  geom_point(size = 0.1) +
-  theme_bw() +
-  # scale_color_manual(values = cbp1) +
-  labs(x = "UMAP 1", y = "UMAP 2", color = "Seurat \nClusters", title = "") +
-  theme(
-    axis.ticks.x = element_blank(),
-    axis.text.x = element_blank(),
-    axis.ticks.y = element_blank(),
-    axis.text.y = element_blank(),
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank()
-  ) +
-  guides(color = guide_legend(override.aes = list(size = 2)))
-
-figure_s2d <- seurat_cluster_plot$data %>%
-  ggplot(aes(x = UMAP_1, y = UMAP_2)) +
-  geom_point(size = 0.1, color = "grey") +
-  theme_bw() +
-  # scale_color_manual(values = cbp1) +
-  labs(x = "UMAP 1", y = "UMAP 2") +
-  theme(
-    axis.ticks.x = element_blank(),
-    axis.text.x = element_blank(),
-    axis.ticks.y = element_blank(),
-    axis.text.y = element_blank(),
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank()
-  ) +
-  guides(color = guide_legend(override.aes = list(size = 2)))
-figure_s2d
-
-
-(figure_s2a + figure_s2b) / (figure_s2c + figure_s2d)
-```
 
 # Integrate the cells and SBO tags
 
@@ -482,7 +413,7 @@ figure_s2d
 
 ## Cell library 1
 ### Integrate
-```{r message=FALSE, warning=FALSE, include=FALSE}
+```{r cell library 1 intergration, message=FALSE, warning=FALSE, include=FALSE}
 sbo_lib_1.data <- readRDS("~/Documents/sbo_scrnaseq_analysis/results/r_scripts/sbo_lib_1.data.rds")
 
 tagged_cells_seurat_matrix1 <- as.matrix(GetAssayData(object = cell_library_1, 
@@ -492,6 +423,12 @@ tagged_cells_seurat_matrix1 <- as.matrix(GetAssayData(object = cell_library_1,
 cho_lib1_joint_bcs <- intersect(colnames(sbo_lib_1.data), 
                                 colnames(tagged_cells_seurat_matrix1))
 
+sum(!colnames(sbo_lib_1.data) %in% "TCATGGATCGGAGTGA")
+
+as_tibble(sbo_lib_1.data@meta.data,rownames = "cell_label") %>%
+  filter(!cell_label %in% cho_lib1_joint_bcs)
+
+paste(length(cho_lib1_joint_bcs) ," matched for mRNA and SBO library 1" )
 
 # retain the cells that overlap
 cho_cells_lib_1 <- tagged_cells_seurat_matrix1[, cho_lib1_joint_bcs]
@@ -500,7 +437,7 @@ cho_cells_lib_1 <- tagged_cells_seurat_matrix1[, cho_lib1_joint_bcs]
 # create new seurat object
 cho_cell_sbo_lib_1 <- CreateSeuratObject(
   counts = cho_cells_lib_1, 
-  project = "Cell-SBO library 1"
+  project = "RNA library 1"
 )
 
 cho_cell_sbo_lib_1[["percent.mt"]] <- cell_library_1$percent.mt[cho_lib1_joint_bcs]
@@ -524,16 +461,39 @@ cho_cell_sbo_lib_1[["SBO"]] <- CreateAssayObject(counts = cho_lib_1_sbo)
 cho_cell_sbo_lib_1 <- NormalizeData(cho_cell_sbo_lib_1, assay = "SBO", 
                                normalization.method = "CLR")
 
-# classify
+eval_pq_lib1 = tibble()
+for (i in seq(from=0.9, to=0.9999999, by =0.005)){
+
+  cho_cell_sbo_lib_1 <- HTODemux(cho_cell_sbo_lib_1, assay = "SBO", 
+                          positive.quantile = i)
+
+  hto_demux_classification <- cho_cell_sbo_lib_1@meta.data %>%
+    filter(SBO_classification.global != "Negative") %>%
+    group_by(SBO_classification.global) %>%
+    summarise(cells = n()) %>%
+    mutate(threshold=i)
+  
+  eval_pq_lib1 <- bind_rows(eval_pq_lib1, hto_demux_classification) %>%
+    mutate(library="library 1")
+  }
+
+eval_pq_lib1_plot <- eval_pq_lib1 %>%
+  ggplot(aes(x=threshold, y=cells, color=SBO_classification.global)) +
+           geom_point() +
+           geom_line() + 
+  geom_vline(xintercept = 0.975, linetype=11, size=0.2) +
+  theme_bw() +
+  labs(y="# Cells", x="HTODemux positive quantile treshold", color="SBO identification", title="SBO library 1")
 cho_cell_sbo_lib_1 <- HTODemux(cho_cell_sbo_lib_1, assay = "SBO", 
-                          positive.quantile = 0.99)
+                          positive.quantile = 0.975)
+
 
 # show table
 table(cho_cell_sbo_lib_1$SBO_maxID, cho_cell_sbo_lib_1$SBO_classification.global)
 
 # data for merged classification plot
 classification_library_1 <- data.frame(table(cho_cell_sbo_lib_1$SBO_maxID, cho_cell_sbo_lib_1$SBO_classification.global)) %>%
-  mutate(library="Library 1")
+  mutate(library="RNA library 1")
 
 # remove cells with no matched SBO 
 cho_cell_sbo_lib_1.subset <- subset(cho_cell_sbo_lib_1, idents = "Negative", invert = T)
@@ -551,6 +511,7 @@ tagged_cells_seurat_matrix2 <- as.matrix(GetAssayData(object = cell_library_2,
 cho_lib2_joint_bcs <- intersect(colnames(sbo_lib_2.data), 
                                 colnames(tagged_cells_seurat_matrix2))
 
+paste(length(cho_lib2_joint_bcs) ," matched for mRNA and SBO library 2" )
 
 # retain the cells that overlap
 cho_cells_lib_2 <- tagged_cells_seurat_matrix2[, cho_lib2_joint_bcs]
@@ -559,7 +520,7 @@ cho_cells_lib_2 <- tagged_cells_seurat_matrix2[, cho_lib2_joint_bcs]
 # create new seurat object
 cho_cell_sbo_lib_2 <- CreateSeuratObject(
   counts = cho_cells_lib_2, 
-  project = "Cell-SBO library 2"
+  project = "RNA library 2"
 )
 
 cho_cell_sbo_lib_2[["percent.mt"]] <- cell_library_2$percent.mt[cho_lib2_joint_bcs]
@@ -583,20 +544,51 @@ cho_cell_sbo_lib_2[["SBO"]] <- CreateAssayObject(counts = cho_lib_2_sbo)
 cho_cell_sbo_lib_2 <- NormalizeData(cho_cell_sbo_lib_2, assay = "SBO", 
                                normalization.method = "CLR")
 
-# classify
+eval_pq_lib2 = tibble()
+for (i in seq(from=0.9, to=0.9999999, by =0.005)){
+
+  cho_cell_sbo_lib_2 <- HTODemux(cho_cell_sbo_lib_2, assay = "SBO", 
+                          positive.quantile = i)
+
+  hto_demux_classification <- cho_cell_sbo_lib_2@meta.data %>%
+    filter(SBO_classification.global != "Negative") %>%
+    group_by(SBO_classification.global) %>%
+    summarise(cells = n()) %>%
+    mutate(threshold=i)
+  
+  eval_pq_lib2 <- bind_rows(eval_pq_lib2, hto_demux_classification) %>%
+    mutate(library="library 2")
+  }
+
+eval_pq_lib2_plot <- eval_pq_lib2 %>%
+  ggplot(aes(x=threshold, y=cells, color=SBO_classification.global)) +
+           geom_point() +
+           geom_line() + 
+  geom_vline(xintercept = 0.975, linetype=11, size=0.2) +
+  theme_bw() +
+  labs(y="# Cells", x="HTODemux positive quantile treshold", color="SBO identification", title="SBO library 2")
+
 cho_cell_sbo_lib_2 <- HTODemux(cho_cell_sbo_lib_2, assay = "SBO", 
-                          positive.quantile = 0.99)
+                          positive.quantile = 0.975)
 
 # show table
 table(cho_cell_sbo_lib_2$SBO_maxID, cho_cell_sbo_lib_2$SBO_classification.global)
 
 # data for merged classification plot
 classification_library_2 <- data.frame(table(cho_cell_sbo_lib_2$SBO_maxID, cho_cell_sbo_lib_2$SBO_classification.global)) %>%
-  mutate(library="Library 2")
+  mutate(library="RNA library 2")
 
 # remove cells with no matched SBO 
 cho_cell_sbo_lib_2.subset <- subset(cho_cell_sbo_lib_2, idents = "Negative", invert = T)
 ```
+
+```{r}
+figure_s3 <- (eval_pq_lib1_plot / eval_pq_lib2_plot) + plot_layout(guides = "collect") + plot_annotation(tag_levels = 'a') & theme(legend.position = 'bottom')
+
+figure_s3
+ggsave(plot = figure_s3, filename = paste(results_dir, "Figure S3.png", sep = ""), width = 5, height = 5, device = "png", dpi = 700)
+```
+
 
 ## Combine cell library 1 & 2
 ```{r message=FALSE, warning=FALSE}
@@ -633,7 +625,7 @@ figure_2d <- sbo_combined_tsne_plot$data %>%
   guides(color = guide_legend(override.aes = list(size = 2)))
 
 figure_2d
-ggsave(plot = figure_2d, filename = paste(results_dir, "Figure_2D.png", sep = ""), width = 5, height = 3.5, device = "png", dpi = 700)
+ggsave(plot = figure_2d, filename = paste(results_dir, "Figure_2C.png", sep = ""), width = 6, height = 4, device = "png", dpi = 700)
 
 HTOHeatmap(cho.combined.sbo, assay = "SBO") + scale_fill_viridis_b()
 ```
@@ -707,7 +699,7 @@ ggsave(plot = sbo_classification_barplot, filename = paste(results_dir, "Figure_
 ```
 
 ```{r}
-bind_rows(classification_library_1, classification_library_2) %>%
+per_sample_sbo_classifications <- bind_rows(classification_library_1, classification_library_2) %>%
   mutate(ident = case_when(
     Var1 == "8-hours-untreated-CCGGACTT" ~ "TM- [CCGGACTT]",
     Var1 == "1-hours-treated-GCTTGCCT" ~ "TM+ 1hr [GCTTGCCT]",
@@ -718,11 +710,14 @@ bind_rows(classification_library_1, classification_library_2) %>%
   )) %>%
   ggplot(aes(x=ident, y=Freq, fill=Var2)) +
   geom_bar(stat="identity",position = "stack") +
-  labs(x="", y="# Cells", fill="Classification") +
+  labs(x="", y="# Cells", fill="SBO \nClassification") +
   facet_wrap(~library, nrow = 2) + 
   theme_bw() +
   theme(axis.text.x = element_text(angle = 35, vjust = 1, hjust = 1)) +
   scale_fill_viridis(discrete = T, direction = -1, option = "plasma")
+
+per_sample_sbo_classifications
+ggsave(plot = per_sample_sbo_classifications, filename = paste(results_dir, "Figure S2.png", sep = ""), width = 7, height = 5, device = "png", dpi = 700)
 ```
 
 ## Analysis of classified cells
@@ -781,11 +776,80 @@ cho.combined.sct <- AddMetaData(cho.combined.sct, metadata = sample_information$
 ## Visualisation of tagged cells
 ```{r include=FALSE}
 cho.combined.sct <- RunPCA(object = cho.combined.sct, verbose = FALSE, npcs = 100)
+```
 
-ElbowPlot(cho.combined.sct,ndims = 100)
 
-cho.combined.sct <- RunUMAP(object = cho.combined.sct, dims = 1:25)
+```{r include=FALSE}
+elbow_plot <- ElbowPlot(cho.combined.sct,ndims = 100)
 
+elbow_plot <- elbow_plot$data %>%
+  ggplot(aes(x=dims, y=stdev)) +
+  geom_line() + 
+  geom_point() +
+  geom_vline(xintercept = 20, linetype=11, size=0.2, color="red") +
+  theme_bw() +
+  labs(x="Principal components", y="Standard Deviation")
+
+ggsave(plot = elbow_plot, filename = paste(results_dir, "Figure S3.png", sep = ""), width = 5, height = 5, device = "png", dpi = 700)
+```
+
+
+```{r include=FALSE}
+cho.combined.sct <- RunUMAP(object = cho.combined.sct, dims = 1:10)
+```
+
+### Supplementary Figure 2
+```{r fig.height=5, fig.width=8}
+# overlay library
+seurat_dim_plot_lib <- DimPlot(cho.combined.sct, reduction = "umap", group.by = c("library"), pt.size = 0.5)
+# overlay cell cycle phase
+seurat_dim_plot_cc <- DimPlot(cho.combined.sct, reduction = "umap", group.by = c("Phase"), pt.size = 0.5)
+
+cbp1 <- c(
+  "#E69F00", "#009E73",
+  "#F0E442", "#0072B2", "#D55E00", "#CC79A7"
+)
+
+figure_s4a <- seurat_dim_plot_lib$data %>%
+  ggplot(aes(x = UMAP_1, y = UMAP_2, color = library)) +
+  geom_point(size = 0.1) +
+  theme_bw() +
+  scale_color_manual(values = cbp1) +
+  labs(x = "UMAP 1", y = "UMAP 2", color = "Source") +
+  theme(
+    axis.ticks.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.text.y = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  ) +
+  guides(color = guide_legend(override.aes = list(size = 2)))
+
+figure_s4b <- seurat_dim_plot_cc$data %>%
+  ggplot(aes(x = UMAP_1, y = UMAP_2, color = Phase)) +
+  geom_point(size = 0.1) +
+  theme_bw() +
+  # scale_color_manual(values = cbp1) +
+  labs(x = "UMAP 1", y = "UMAP 2", color = "Phase") +
+  theme(
+    axis.ticks.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.text.y = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  ) +
+  guides(color = guide_legend(override.aes = list(size = 2)))
+
+
+figure_s4 <- (figure_s4a + figure_s4b) 
+figure_s4
+ggsave(plot = figure_s4, filename = paste(results_dir, "Figure S4.png", sep = ""), width = 6, height = 2.5, device = "png", dpi = 700)
+```
+
+
+```{r include=FALSE}
 sbo_tagged_cells_umap_plot <- DimPlot(cho.combined.sct, group.by = c("treatment"), combine = FALSE)
 
 viridis_cp <- c("#fde725", "#5ec962", "#21918c", "#31688e", "#440154")
@@ -814,6 +878,7 @@ figure_2e <- sbo_tagged_cells_umap_plot[[1]]$data %>%
   scale_color_manual(values = viridis_cp) +
   labs(x = "UMAP 1", y = "UMAP 2", color = "Treatment", subtitle = "Classificaiton of cells by barcode") +
   guides(color = guide_legend(override.aes = list(size = 2))) +
+  scale_x_reverse() +
   theme(
     plot.title = element_text(size = 10, face = "bold.italic"),
     legend.position = "right",
@@ -827,7 +892,7 @@ ggsave(plot = figure_2e, filename = paste(results_dir, "Figure_2D.png", sep = ""
 
 ### Cell cycle classification for each treatment
 ```{r}
-cho.combined.sct@meta.data %>%
+cell_cycle_proportion_plot <- cho.combined.sct@meta.data %>%
   group_by(treatment, Phase) %>%
   summarise(n = n()) %>%
   mutate(freq = n / sum(n)) %>%
@@ -836,6 +901,8 @@ cho.combined.sct@meta.data %>%
   #scale_fill_manual(values = c("#CC6677", "#44AA99", "#88CCEE")) +
   theme_bw() +
   labs(x="",y = "Proportion of cells", fill = "Phase")
+
+ggsave(plot = cell_cycle_proportion_plot , filename = paste(results_dir, "Figure S5.png", sep = ""), width = 5, height = 3, device = "png", dpi = 700)
 ```
 ## Visualise known ER stress marker genes 
 ### UMAP
@@ -848,6 +915,7 @@ hspa5_umap <- FeaturePlot(cho.combined.sct, features = c("Hspa5-1"))$data %>%
   scale_color_viridis(option = "turbo", direction = 1) +
   theme_bw() +
   coord_fixed() +
+  scale_x_reverse() +
   labs(x = "UMAP 2", y = "UMAP 1", color = "Hspa5 \nExpression \nlevel") +
   theme(
     plot.title = element_text(size = 10, face = "bold.italic"),
@@ -864,6 +932,7 @@ ddit3_umap <- FeaturePlot(cho.combined.sct, features = c("Ddit3-1"))$data %>%
   scale_color_viridis(option = "turbo") +
   theme_bw() +
   coord_fixed() +
+  scale_x_reverse() +
   labs(x = "UMAP 2", y = "UMAP 1", color = "Ddit3 \nExpression \nlevel") +
   theme(
     plot.title = element_text(size = 10, face = "bold.italic"),
@@ -880,6 +949,7 @@ atf4_umap <- FeaturePlot(cho.combined.sct, features = c("Atf4-1"))$data %>%
   scale_color_viridis(option = "turbo") +
   theme_bw() +
   coord_fixed() +
+  scale_x_reverse() +
   labs(x = "UMAP 2", y = "UMAP 1", color = "Atf4 \nExpression \nlevel") +
   theme(
     plot.title = element_text(size = 10, face = "bold.italic"),
@@ -975,7 +1045,7 @@ for (group in unique(cho.combined.sct$treatment)) {
   cur_metacell_seurat <- scWGCNA::construct_metacells(
     cur_seurat,
     name = group,
-    k = 25,
+    k = 10,
     reduction = "umap",
     assay = "RNA", slot = "data"
   )
@@ -1060,10 +1130,12 @@ for (col in 1:length(plotCols)) {
     legend("topright", legend = "Metacells", col = colors, pch = 20)
   }
 }
+
+powerTable
 ```
 ### Identify gene modules
 ```{r}
-softPower <- 9
+softPower <- 20
 
 nSets <- 1
 setLabels <- "treatment"
@@ -1194,7 +1266,7 @@ write.csv(geneInfo_annotated, file = paste0(results_dir, "WGCNA_geneInfo_signed.
 ```
 
 ### Relationship between coexpressed modules and TM
-```{r fig.height=4, fig.width=8}
+```{r fig.height=8, fig.width=8}
 plot_df <- cbind(select(targets, c(orig.ident)), PCvalues)
 plot_df <- reshape2::melt(plot_df, id.vars = c("orig.ident"))
 plot_df$orig.ident <- factor(plot_df$orig.ident, levels = c("control", "TM+ 1hr", "TM+ 2hr", "TM+ 4hr", "TM+ 8hr"))
@@ -1221,7 +1293,7 @@ wgcna_boxplot
 ggsave(plot = wgcna_boxplot, filename = paste(results_dir, "Figure_3B.png", sep = ""), width = 9, height = 4.5, device = "png", dpi = 700)
 ```
 
-## Gene set enrichment analysis
+### Gene set enrichment analysis
 ```{r}
 enrichdir <- paste0(results_dir, "/enrichment_analysis/")
 suppressMessages(if (file.exists(enrichdir)) {
@@ -1257,7 +1329,7 @@ enrich_result <- WebGestaltRBatch(
   topThr = 10,
   reportNum = 20,
   perNum = 1000,
-  projectName = "Pseudotime",
+  projectName = "SBO ER stress",
   isOutput = TRUE,
   outputDirectory = enrichdir,
   dagColor = "continuous",
