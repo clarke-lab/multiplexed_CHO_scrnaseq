@@ -15,6 +15,8 @@ package_list <- c(
 )
 
 lapply(package_list, require, character.only = TRUE)
+
+set.seed(38)
 ```
 
 ## Create results directory
@@ -224,10 +226,10 @@ cell_library_1_meta_data <- cell_library_1@meta.data %>%
   mutate(library = "Cell library 1")
 
 cell_library_1 <- subset(cell_library_1,
-  subset = nFeature_RNA > feat.min.lib1  &
-    nFeature_RNA < feat.max.lib1  &
-    nCount_RNA > count.min.lib1 &
-    nCount_RNA < count.max.lib1 &
+  subset = nFeature_RNA >= 6000  &
+    nFeature_RNA <= 9000  &
+    nCount_RNA > count_low &
+    nCount_RNA < count_high &
     percent.mt < mt_threshold
 )
 
@@ -297,10 +299,10 @@ cell_library_2_meta_data <- cell_library_2@meta.data %>%
   mutate(library = "Cell library 2")
 
 cell_library_2 <- subset(cell_library_2,
-  subset = nFeature_RNA > feat.min.lib2  &
-    nFeature_RNA < feat.max.lib2  &
-    nCount_RNA > count.min.lib2 &
-    nCount_RNA < count.max.lib2 &
+  subset = nFeature_RNA >= 6000  &
+    nFeature_RNA <= 9000  &
+    nCount_RNA > count_low &
+    nCount_RNA < count_high &
     percent.mt < mt_threshold
 )
 
@@ -311,7 +313,7 @@ cell_library_2
 ```{r fig.height=5, fig.width=6, message=FALSE, warning=FALSE}
 threshold_line_values <- bind_rows(cell_lib_1_threshold_line_values, cell_lib_2_threshold_line_values)
 
-preprocessing_violin <- bind_rows(cell_library_1_meta_data, cell_library_2_meta_data) %>%
+figure_s2 <- bind_rows(cell_library_1_meta_data, cell_library_2_meta_data) %>%
   pivot_longer(cols = c(`# UMIs`, `# Genes`, `% mito`)) %>%
   ggplot(aes(x = orig.ident, y = value, fill = name)) +
   geom_violin() +
@@ -329,8 +331,8 @@ preprocessing_violin <- bind_rows(cell_library_1_meta_data, cell_library_2_meta_
   geom_hline(data = threshold_line_values, aes(yintercept = c(lower)), linetype = 11, size = 0.3) +
   geom_hline(data = threshold_line_values, aes(yintercept = c(upper)), linetype = 11, size = 0.3)
 
-preprocessing_violin
-ggsave(plot = preprocessing_violin, filename = paste(results_dir, "Figure S1.png", sep = ""), width = 7, height = 5, device = "png", dpi = 700)
+figure_s2
+ggsave(plot = figure_s2, filename = paste(results_dir, "Figure S1.png", sep = ""), width = 7, height = 5, device = "png", dpi = 700)
 ```
 
 
@@ -423,10 +425,6 @@ tagged_cells_seurat_matrix1 <- as.matrix(GetAssayData(object = cell_library_1,
 cho_lib1_joint_bcs <- intersect(colnames(sbo_lib_1.data), 
                                 colnames(tagged_cells_seurat_matrix1))
 
-sum(!colnames(sbo_lib_1.data) %in% "TCATGGATCGGAGTGA")
-
-as_tibble(sbo_lib_1.data@meta.data,rownames = "cell_label") %>%
-  filter(!cell_label %in% cho_lib1_joint_bcs)
 
 paste(length(cho_lib1_joint_bcs) ," matched for mRNA and SBO library 1" )
 
@@ -629,7 +627,7 @@ ggsave(plot = figure_2d, filename = paste(results_dir, "Figure_2C.png", sep = ""
 
 HTOHeatmap(cho.combined.sbo, assay = "SBO") + scale_fill_viridis_b()
 ```
-
+### ridgeplot
 ```{r fig.height=3, fig.width=10}
 Idents(cho.combined.sbo) <- "SBO_maxID"
 
@@ -656,7 +654,7 @@ tm_1hr_ridge <- RidgePlot(cho.combined.sbo, assay = "SBO", features = rownames(c
 
 ridge_data <- bind_rows(control_ridge, tm_1hr_ridge, tm_2hr_ridge, tm_4hr_ridge, tm_8hr_ridge)
 
-ridge_plot_merged <- ridge_data %>%
+figure_s3 <- ridge_data %>%
   mutate(ident = case_when(
     ident == "8-hours-untreated-CCGGACTT" ~ "TM- [CCGGACTT]",
     ident == "1-hours-treated-GCTTGCCT" ~ "TM+ 1hr [GCTTGCCT]",
@@ -678,8 +676,8 @@ ridge_plot_merged <- ridge_data %>%
   facet_wrap(~tag, nrow = 1) +
   theme(legend.position = "none")
 
-ridge_plot_merged
-ggsave(plot = ridge_plot_merged, filename = paste(results_dir, "Figure_2D.png", sep = ""), width = 12, height = 4, device = "png", dpi = 700)
+figure_s3
+ggsave(plot = figure_s3, filename = paste(results_dir, "Figure S3.png", sep = ""), width = 12, height = 4, device = "png", dpi = 700)
 ```
 ```{r}
 sbo_classification_barplot <- bind_rows(cho_cell_sbo_lib_1@meta.data, cho_cell_sbo_lib_2@meta.data) %>%
@@ -697,9 +695,9 @@ sbo_classification_barplot
 ggsave(plot = sbo_classification_barplot, filename = paste(results_dir, "Figure_2B.png", sep = ""), 
        width = 2.5, height = 3, device = "png", dpi = 700)
 ```
-
+### SBO classification by sample
 ```{r}
-per_sample_sbo_classifications <- bind_rows(classification_library_1, classification_library_2) %>%
+figure_s4 <- bind_rows(classification_library_1, classification_library_2) %>%
   mutate(ident = case_when(
     Var1 == "8-hours-untreated-CCGGACTT" ~ "TM- [CCGGACTT]",
     Var1 == "1-hours-treated-GCTTGCCT" ~ "TM+ 1hr [GCTTGCCT]",
@@ -716,8 +714,8 @@ per_sample_sbo_classifications <- bind_rows(classification_library_1, classifica
   theme(axis.text.x = element_text(angle = 35, vjust = 1, hjust = 1)) +
   scale_fill_viridis(discrete = T, direction = -1, option = "plasma")
 
-per_sample_sbo_classifications
-ggsave(plot = per_sample_sbo_classifications, filename = paste(results_dir, "Figure S2.png", sep = ""), width = 7, height = 5, device = "png", dpi = 700)
+figure_s4
+ggsave(plot = figure_s4, filename = paste(results_dir, "Figure S4.png", sep = ""), width = 7, height = 5, device = "png", dpi = 700)
 ```
 
 ## Analysis of classified cells
@@ -778,28 +776,29 @@ cho.combined.sct <- AddMetaData(cho.combined.sct, metadata = sample_information$
 cho.combined.sct <- RunPCA(object = cho.combined.sct, verbose = FALSE, npcs = 100)
 ```
 
+### Elbow plot
+```{r}
+figure_s5 <- ElbowPlot(cho.combined.sct,ndims = 100)
 
-```{r include=FALSE}
-elbow_plot <- ElbowPlot(cho.combined.sct,ndims = 100)
-
-elbow_plot <- elbow_plot$data %>%
+figure_s5 <- figure_s5$data %>%
   ggplot(aes(x=dims, y=stdev)) +
   geom_line() + 
   geom_point() +
-  geom_vline(xintercept = 20, linetype=11, size=0.2, color="red") +
+  geom_vline(xintercept = 22, linetype=11, size=0.2, color="red") +
   theme_bw() +
   labs(x="Principal components", y="Standard Deviation")
 
-ggsave(plot = elbow_plot, filename = paste(results_dir, "Figure S3.png", sep = ""), width = 5, height = 5, device = "png", dpi = 700)
+figure_s5
+ggsave(plot = figure_s5, filename = paste(results_dir, "Figure S3.png", sep = ""), width = 5, height = 5, device = "png", dpi = 700)
 ```
 
 
 ```{r include=FALSE}
-cho.combined.sct <- RunUMAP(object = cho.combined.sct, dims = 1:10)
+cho.combined.sct <- RunUMAP(object = cho.combined.sct, dims = 1:30)
 ```
 
-### Supplementary Figure 2
-```{r fig.height=5, fig.width=8}
+### Supplementary Figure 6
+```{r fig.height=8, fig.width=4}
 # overlay library
 seurat_dim_plot_lib <- DimPlot(cho.combined.sct, reduction = "umap", group.by = c("library"), pt.size = 0.5)
 # overlay cell cycle phase
@@ -810,7 +809,7 @@ cbp1 <- c(
   "#F0E442", "#0072B2", "#D55E00", "#CC79A7"
 )
 
-figure_s4a <- seurat_dim_plot_lib$data %>%
+figure_s6a <- seurat_dim_plot_lib$data %>%
   ggplot(aes(x = UMAP_1, y = UMAP_2, color = library)) +
   geom_point(size = 0.1) +
   theme_bw() +
@@ -826,7 +825,7 @@ figure_s4a <- seurat_dim_plot_lib$data %>%
   ) +
   guides(color = guide_legend(override.aes = list(size = 2)))
 
-figure_s4b <- seurat_dim_plot_cc$data %>%
+figure_s6b <- seurat_dim_plot_cc$data %>%
   ggplot(aes(x = UMAP_1, y = UMAP_2, color = Phase)) +
   geom_point(size = 0.1) +
   theme_bw() +
@@ -843,32 +842,32 @@ figure_s4b <- seurat_dim_plot_cc$data %>%
   guides(color = guide_legend(override.aes = list(size = 2)))
 
 
-figure_s4 <- (figure_s4a + figure_s4b) 
-figure_s4
-ggsave(plot = figure_s4, filename = paste(results_dir, "Figure S4.png", sep = ""), width = 6, height = 2.5, device = "png", dpi = 700)
+figure_s6 <- (figure_s6a / plot_spacer()+ figure_s6b) + plot_layout(heights =  c(4,0.5,4)) + plot_annotation(tag_levels = 'a')
+figure_s6 
+ggsave(plot = figure_s6, filename = paste(results_dir, "Figure S4.png", sep = ""), width = 4, height = 6.5, device = "png", dpi = 700)
 ```
 
-
-```{r include=FALSE}
+### Plot classified cells
+```{r}
 sbo_tagged_cells_umap_plot <- DimPlot(cho.combined.sct, group.by = c("treatment"), combine = FALSE)
 
 viridis_cp <- c("#fde725", "#5ec962", "#21918c", "#31688e", "#440154")
 
 
-figure_2ea <- sbo_tagged_cells_umap_plot[[1]]$data %>%
-  ggplot(aes(x = UMAP_1, y = UMAP_2)) +
-  geom_point(size = 0.1, color="grey") +
-  theme_bw() +
-  coord_fixed() +
-  scale_color_manual(values = viridis_cp) +
-  labs(x = "UMAP 1", y = "UMAP 2", color = "Treatment", subtitle = "") +
-  guides(color = guide_legend(override.aes = list(size = 2))) +
-  theme(
-    plot.title = element_text(size = 10, face = "bold.italic"),
-    legend.position = "right",
-    legend.title = element_text(size = 10),
-    legend.text = element_text(size = 9)
-  )
+# figure_2ea <- sbo_tagged_cells_umap_plot[[1]]$data %>%
+#   ggplot(aes(x = UMAP_1, y = UMAP_2)) +
+#   geom_point(size = 0.1, color="grey") +
+#   theme_bw() +
+#   coord_fixed() +
+#   scale_color_manual(values = viridis_cp) +
+#   labs(x = "UMAP 1", y = "UMAP 2", color = "Treatment", subtitle = "") +
+#   guides(color = guide_legend(override.aes = list(size = 2))) +
+#   theme(
+#     plot.title = element_text(size = 10, face = "bold.italic"),
+#     legend.position = "right",
+#     legend.title = element_text(size = 10),
+#     legend.text = element_text(size = 9)
+#   )
 
 figure_2e <- sbo_tagged_cells_umap_plot[[1]]$data %>%
   ggplot(aes(x = UMAP_1, y = UMAP_2, color = treatment)) +
@@ -878,7 +877,6 @@ figure_2e <- sbo_tagged_cells_umap_plot[[1]]$data %>%
   scale_color_manual(values = viridis_cp) +
   labs(x = "UMAP 1", y = "UMAP 2", color = "Treatment", subtitle = "Classificaiton of cells by barcode") +
   guides(color = guide_legend(override.aes = list(size = 2))) +
-  scale_x_reverse() +
   theme(
     plot.title = element_text(size = 10, face = "bold.italic"),
     legend.position = "right",
@@ -886,7 +884,7 @@ figure_2e <- sbo_tagged_cells_umap_plot[[1]]$data %>%
     legend.text = element_text(size = 9)
   )
 
-figure_2ea+ figure_2e
+figure_2e
 ggsave(plot = figure_2e, filename = paste(results_dir, "Figure_2D.png", sep = ""), width = 5, height = 4, device = "png", dpi = 700)
 ```
 
@@ -1028,7 +1026,7 @@ marker_gene_umap <- (((hspa5_violin / hspa5_umap + plot_layout(heights = c(0.8, 
   (ddit3_violin / ddit3_umap + plot_layout(heights = c(0.7, 1))))
 
 marker_gene_umap
-ggsave(plot = marker_gene_umap, filename = paste(results_dir, "Figure_2F.png", sep = ""), width = 9, height = 4.5, device = "png", dpi = 700)
+ggsave(plot = marker_gene_umap, filename = paste(results_dir, "Figure 2E.png", sep = ""), width = 9, height = 4.5, device = "png", dpi = 700)
 ```
 
 
@@ -1135,7 +1133,7 @@ powerTable
 ```
 ### Identify gene modules
 ```{r}
-softPower <- 20
+softPower <- 16
 
 nSets <- 1
 setLabels <- "treatment"
@@ -1185,6 +1183,10 @@ KMEs <- signedKME(datExpr, MEs, outputColumnName = "kME", corFnc = "bicor")
 # compile into a module metadata table
 geneInfo <- as.data.frame(cbind(colnames(datExpr), moduleColors, KMEs))
 
+geneInfo %>%
+  filter(Initially.Assigned.Module.Color == "black") %>%
+  arrange(-kMEblack)
+
 # how many modules did we get?
 nmodules <- length(unique(moduleColors))
 
@@ -1196,12 +1198,16 @@ PCvalues <- MEs
 
 png(file = paste(results_dir, "Figure_3A.png", sep = ""), units = "in", width = 6, height = 3, res = 700)
 
+unique(moduleColors)
+
 plotDendroAndColors(consTree, moduleColors, "Module colors",
   dendroLabels = FALSE, hang = 0.03, addGuide = TRUE, guideHang = 0.05,
-  main = paste0("CHOK1GS gene dendrogram and module colors")
+  main = paste0("")
 )
 
 dev.off()
+
+save(geneInfo, file="unannotated_gene_info.rData")
 ```
 
 ### Annotate WGCNA results
@@ -1261,6 +1267,7 @@ pcg_with_loc_ids <- pcg_with_loc_ids %>%
 
 geneInfo_annotated <- bind_rows(pcg_without_loc_ids, pcg_with_loc_ids)
 
+
 # save info
 write.csv(geneInfo_annotated, file = paste0(results_dir, "WGCNA_geneInfo_signed.csv"))
 ```
@@ -1292,6 +1299,34 @@ wgcna_boxplot <- plot_df %>%
 wgcna_boxplot
 ggsave(plot = wgcna_boxplot, filename = paste(results_dir, "Figure_3B.png", sep = ""), width = 9, height = 4.5, device = "png", dpi = 700)
 ```
+
+
+```{r}
+geneInfo %>%
+  filter(Initially.Assigned.Module.Color == "black") %>%
+  arrange(-kMEblack)
+
+goi <- "Insig1-1"
+
+test_umap <- FeaturePlot(cho.combined.sct, features = c(goi))$data %>%
+  mutate(gene = "goi") %>%
+  rename(expression = "Insig1.1") %>%
+  ggplot(aes(x = UMAP_1, y = UMAP_2, color = expression)) +
+  geom_point(size = 0.1) +
+  scale_color_viridis(option = "turbo", direction = 1) +
+  theme_bw() +
+  coord_fixed() +
+  labs(x = "UMAP 2", y = "UMAP 1", color = "Hspa5 \nExpression \nlevel") +
+  theme(
+    plot.title = element_text(size = 10, face = "bold.italic"),
+    legend.position = "right",
+    legend.title = element_text(size = 8),
+    legend.text = element_text(size = 7)
+  )
+
+test_umap + figure_2e
+```
+
 
 ### Gene set enrichment analysis
 ```{r}
@@ -1341,6 +1376,7 @@ enrich_result <- WebGestaltRBatch(
   nThreads = 32
 )
 ```
+
 ```{r}
 blue_module_enrichment <- enrich_result[[1]]$enrichResult[, c(1, 2, 4, 5, 7, 8, 9, 11)] %>%
   mutate(type = "blue_module")
@@ -1380,35 +1416,4 @@ enrichment_plot_turqouise <- bind_rows(blue_module_enrichment[1:10, ], magenta_m
   scale_color_viridis() +
   theme_bw() +
   labs(x = "Enrichment ratio", y = "", size = "Overlap")
-```
-
-```{r}
-geneInfo_annotated %>%
-  filter(Initially.Assigned.Module.Color == "turquoise") %>%
-  arrange(-kMEturquoise) %>%
-  filter(symbol == "Grp78")
-```
-
-```{r}
-geneInfo_annotated %>%
-  filter(Initially.Assigned.Module.Color == "turqouise") %>%
-  arrange(-kMEblue) %>%
-  head()
-
-
-atf4_umap <- FeaturePlot(cho.combined.sct, features = c("Ldlr-1"))$data %>%
-  mutate(gene = "Ldlr") %>%
-  rename(expression = "Ldlr.1") %>%
-  ggplot(aes(x = UMAP_1, y = UMAP_2, color = expression)) +
-  geom_point(size = 0.5) +
-  scale_color_viridis(option = "turbo") +
-  theme_bw() +
-  coord_fixed() +
-  labs(x = "UMAP 2", y = "UMAP 1", color = "Atf4 \nExpression \nlevel") +
-  theme(
-    plot.title = element_text(size = 10, face = "bold.italic"),
-    legend.position = "right",
-    legend.title = element_text(size = 8),
-    legend.text = element_text(size = 7)
-  )
 ```
