@@ -186,7 +186,7 @@ mito <- c(
 #                                         min.features = min_genes_per_cell)
 
 # line to be removed when code finished
-cell_library_1 <- readRDS("~/Documents/sbo_scrnaseq_analysis/results/r_scripts/tagged_cells_lib1.rds")
+cell_library_1 <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/tagged_cells_lib1.rds")
 
 cell_library_1
 
@@ -773,18 +773,18 @@ cho.combined.sct <- AddMetaData(cho.combined.sct, metadata = sample_information$
 
 ## Visualisation of tagged cells
 ```{r include=FALSE}
-cho.combined.sct <- RunPCA(object = cho.combined.sct, verbose = FALSE, npcs = 100)
+cho.combined.sct <- RunPCA(object = cho.combined.sct, verbose = FALSE, npcs = 50)
 ```
 
 ### Elbow plot
-```{r}
+```{r fig.width=3}
 figure_s5 <- ElbowPlot(cho.combined.sct,ndims = 100)
 
 figure_s5 <- figure_s5$data %>%
   ggplot(aes(x=dims, y=stdev)) +
   geom_line() + 
   geom_point() +
-  geom_vline(xintercept = 22, linetype=11, size=0.2, color="red") +
+  geom_vline(xintercept = 30, linetype=11, size=0.2, color="red") +
   theme_bw() +
   labs(x="Principal components", y="Standard Deviation")
 
@@ -800,6 +800,8 @@ cho.combined.sct <- RunUMAP(object = cho.combined.sct, dims = 1:30)
 ### Supplementary Figure 6
 ```{r fig.height=8, fig.width=4}
 # overlay library
+
+scale_fill_brewer(palette = "YlOrRd")
 seurat_dim_plot_lib <- DimPlot(cho.combined.sct, reduction = "umap", group.by = c("library"), pt.size = 0.5)
 # overlay cell cycle phase
 seurat_dim_plot_cc <- DimPlot(cho.combined.sct, reduction = "umap", group.by = c("Phase"), pt.size = 0.5)
@@ -829,6 +831,7 @@ figure_s6b <- seurat_dim_plot_cc$data %>%
   ggplot(aes(x = UMAP_1, y = UMAP_2, color = Phase)) +
   geom_point(size = 0.1) +
   theme_bw() +
+  scale_colour_brewer(palette = "Dark2",direction = 1) +
   # scale_color_manual(values = cbp1) +
   labs(x = "UMAP 1", y = "UMAP 2", color = "Phase") +
   theme(
@@ -874,6 +877,7 @@ figure_2e <- sbo_tagged_cells_umap_plot[[1]]$data %>%
   geom_point(size = 0.1) +
   theme_bw() +
   coord_fixed() +
+  #scale_color_brewer(palette = "Dark2",direction = 1) +
   scale_color_manual(values = viridis_cp) +
   labs(x = "UMAP 1", y = "UMAP 2", color = "Treatment", subtitle = "Classificaiton of cells by barcode") +
   guides(color = guide_legend(override.aes = list(size = 2))) +
@@ -890,17 +894,19 @@ ggsave(plot = figure_2e, filename = paste(results_dir, "Figure_2D.png", sep = ""
 
 ### Cell cycle classification for each treatment
 ```{r}
-cell_cycle_proportion_plot <- cho.combined.sct@meta.data %>%
+figure_s7 <- cho.combined.sct@meta.data %>%
   group_by(treatment, Phase) %>%
   summarise(n = n()) %>%
   mutate(freq = n / sum(n)) %>%
   ggplot(aes(x = treatment, y = freq, fill = Phase)) +
   geom_bar(stat = "identity", position = "stack") +
+  scale_fill_brewer(palette = "Dark2",direction = 1) +
   #scale_fill_manual(values = c("#CC6677", "#44AA99", "#88CCEE")) +
   theme_bw() +
   labs(x="",y = "Proportion of cells", fill = "Phase")
 
-ggsave(plot = cell_cycle_proportion_plot , filename = paste(results_dir, "Figure S5.png", sep = ""), width = 5, height = 3, device = "png", dpi = 700)
+figure_s7
+ggsave(plot = figure_s7 , filename = paste(results_dir, "Figure S7.png", sep = ""), width = 5, height = 3, device = "png", dpi = 700)
 ```
 ## Visualise known ER stress marker genes 
 ### UMAP
@@ -913,7 +919,7 @@ hspa5_umap <- FeaturePlot(cho.combined.sct, features = c("Hspa5-1"))$data %>%
   scale_color_viridis(option = "turbo", direction = 1) +
   theme_bw() +
   coord_fixed() +
-  scale_x_reverse() +
+  #scale_x_reverse() +
   labs(x = "UMAP 2", y = "UMAP 1", color = "Hspa5 \nExpression \nlevel") +
   theme(
     plot.title = element_text(size = 10, face = "bold.italic"),
@@ -930,7 +936,7 @@ ddit3_umap <- FeaturePlot(cho.combined.sct, features = c("Ddit3-1"))$data %>%
   scale_color_viridis(option = "turbo") +
   theme_bw() +
   coord_fixed() +
-  scale_x_reverse() +
+  #scale_x_reverse() +
   labs(x = "UMAP 2", y = "UMAP 1", color = "Ddit3 \nExpression \nlevel") +
   theme(
     plot.title = element_text(size = 10, face = "bold.italic"),
@@ -947,7 +953,7 @@ atf4_umap <- FeaturePlot(cho.combined.sct, features = c("Atf4-1"))$data %>%
   scale_color_viridis(option = "turbo") +
   theme_bw() +
   coord_fixed() +
-  scale_x_reverse() +
+  #scale_x_reverse() +
   labs(x = "UMAP 2", y = "UMAP 1", color = "Atf4 \nExpression \nlevel") +
   theme(
     plot.title = element_text(size = 10, face = "bold.italic"),
@@ -1035,6 +1041,8 @@ ggsave(plot = marker_gene_umap, filename = paste(results_dir, "Figure 2E.png", s
 ```{r}
 genes.keep <- VariableFeatures(cho.combined.sct, assay = "SCT")
 
+length(genes.keep)
+
 seurat_list <- list()
 for (group in unique(cho.combined.sct$treatment)) {
   print(group)
@@ -1043,7 +1051,7 @@ for (group in unique(cho.combined.sct$treatment)) {
   cur_metacell_seurat <- scWGCNA::construct_metacells(
     cur_seurat,
     name = group,
-    k = 10,
+    k = 20,
     reduction = "umap",
     assay = "RNA", slot = "data"
   )
@@ -1059,11 +1067,30 @@ metacell_subset <- RunPCA(metacell_subset, features = rownames(metacell_subset))
 ElbowPlot(metacell_subset)
 
 
-metacell_subset <- RunUMAP(metacell_subset, reduction = "pca", dims = 1:12)
-
-DimPlot(metacell_subset, reduction = "umap", label = TRUE)
+metacell_subset <- RunUMAP(metacell_subset, reduction = "pca", dims = 1:20)
+metacell_umap <- DimPlot(metacell_subset, reduction = "umap", label = FALSE)
 ```
 
+### Pseudobulk UMAP
+```{r}
+figure_3a <- metacell_umap[[1]]$data %>%
+  ggplot(aes(x = UMAP_1, y = UMAP_2, color = ident)) +
+  geom_point(size = 0.1) +
+  theme_bw() +
+  coord_fixed() +
+  scale_color_manual(values = viridis_cp) +
+  labs(x = "UMAP 1", y = "UMAP 2", color = "Treatment", subtitle = "") +
+  guides(color = guide_legend(override.aes = list(size = 2))) +
+  theme(
+    plot.title = element_text(size = 10, face = "bold.italic"),
+    legend.position = "right",
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+  )
+
+figure_3a
+ggsave(plot = figure_3a, filename = paste(results_dir, "Figure 3A.png", sep = ""), width = 5, height = 4, device = "png", dpi = 700)
+```
 
 ```{r}
 # enableWGCNAThreads()
@@ -1129,11 +1156,27 @@ for (col in 1:length(plotCols)) {
   }
 }
 
-powerTable
+powerTable$data %>%
+  ggplot(aes(x=Power, y=SFT.R.sq)) +
+  geom_point(size=0.1) +
+  labs(y="Scale free topology fit", x="Power") +
+  theme_bw()
+  
+powerTable$data %>%
+  ggplot(aes(x=Power, y=mean.k.)) +
+  geom_point(size=0.1) +
+  labs(y="Mean connectivity", x="Power") +
+  theme_bw()
+
+powerTable$data %>%
+  ggplot(aes(x=Power, y=mean.k.)) +
+  geom_point(size=0.1) +
+  labs(y="Mean connectivity", x="Power") +
+  theme_bw() 
 ```
 ### Identify gene modules
 ```{r}
-softPower <- 16
+softPower <- 18
 
 nSets <- 1
 setLabels <- "treatment"
@@ -1160,7 +1203,8 @@ net <- blockwiseConsensusModules(multiExpr,
   useDiskCache = TRUE, chunkSize = NULL,
   deepSplit = 4,
   pamStage = FALSE,
-  detectCutHeight = 0.995, minModuleSize = 50,
+  detectCutHeight = 0.995, 
+  minModuleSize = 50,
   mergeCutHeight = 0.2,
   saveConsensusTOMs = TRUE,
   consensusTOMFilePattern = "ConsensusTOM-block.%b.rda"
@@ -1183,9 +1227,9 @@ KMEs <- signedKME(datExpr, MEs, outputColumnName = "kME", corFnc = "bicor")
 # compile into a module metadata table
 geneInfo <- as.data.frame(cbind(colnames(datExpr), moduleColors, KMEs))
 
-geneInfo %>%
-  filter(Initially.Assigned.Module.Color == "black") %>%
-  arrange(-kMEblack)
+# geneInfo %>%
+#   filter(Initially.Assigned.Module.Color == "black") %>%
+#   arrange(-kMEblack)
 
 # how many modules did we get?
 nmodules <- length(unique(moduleColors))
@@ -1208,6 +1252,70 @@ plotDendroAndColors(consTree, moduleColors, "Module colors",
 dev.off()
 
 save(geneInfo, file="unannotated_gene_info.rData")
+
+plotDendroAndColors(consTree, moduleColors, "Module colors",
+  dendroLabels = FALSE, hang = 0.03, addGuide = TRUE, guideHang = 0.05,
+  main = paste0("")
+)
+
+```
+
+```{r}
+ geneInfo %>%
+   filter(Initially.Assigned.Module.Color == "magenta") %>%
+   arrange(-kMEmagenta)
+```
+
+
+### Relationship between coexpressed modules and TM
+```{r fig.height=10, fig.width=8}
+plot_df <- cbind(select(targets, c(orig.ident)), PCvalues)
+plot_df <- reshape2::melt(plot_df, id.vars = c("orig.ident"))
+plot_df$orig.ident <- factor(plot_df$orig.ident, levels = c("control", "TM+ 1hr", "TM+ 2hr", "TM+ 4hr", "TM+ 8hr"))
+colors <- sub("ME", "", as.character(levels(plot_df$variable)))
+
+wgcna_boxplot_full <- plot_df %>%
+  ggplot(aes(x = orig.ident, y = value, fill = orig.ident)) +
+  scale_fill_manual(values = c("#fde725", "#5ec962", "#21918c", "#31688e", "#440154")) +
+  geom_boxplot(notch = FALSE) +
+  RotatedAxis() +
+  ylab("Module Eigengene") +
+  xlab("") +
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    strip.text.x = element_text(face = "bold"),
+    strip.background = element_blank(),
+    axis.text.x = element_text(angle = 35, vjust = 1, hjust = 1)
+  ) +
+  facet_wrap(~variable, scales = "free", ncol = 3)
+
+
+wgcna_boxplot_filtered <- plot_df %>%
+  filter(variable %in% c("MEturquoise", "MEblue", "MEmagenta")) %>%
+  mutate(new=factor(variable,labels=c("MEturquoise","MEblue","MEmagenta"),  levels=c("MEturquoise","MEblue","MEmagenta"))) %>%
+  ggplot(aes(x = orig.ident, y = value, fill = orig.ident)) +
+  scale_fill_manual(values = c("#fde725", "#5ec962", "#21918c", "#31688e", "#440154")) +
+  geom_boxplot(notch = FALSE, width=0.4) +
+  RotatedAxis() +
+  ylab("Module Eigengene") +
+  xlab("") +
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    strip.text.x = element_text(face = "bold"),
+    strip.background = element_blank(),
+    axis.text.x = element_text(angle = 35, vjust = 1, hjust = 1),
+    panel.spacing = unit(2, "lines")
+  ) +
+  facet_wrap(~new, scales = "free", ncol = 3)
+
+wgcna_boxplot_filtered
+
+ggsave(plot = wgcna_boxplot_filtered, filename = paste(results_dir, "Figure 3B.png", sep = ""), width = 9, height = 3.25, device = "png", dpi = 700)
+
+geneInfo_annotated %>%
+  filter(Initially.Assigned.Module.Color == "magenta")
 ```
 
 ### Annotate WGCNA results
@@ -1272,39 +1380,13 @@ geneInfo_annotated <- bind_rows(pcg_without_loc_ids, pcg_with_loc_ids)
 write.csv(geneInfo_annotated, file = paste0(results_dir, "WGCNA_geneInfo_signed.csv"))
 ```
 
-### Relationship between coexpressed modules and TM
-```{r fig.height=8, fig.width=8}
-plot_df <- cbind(select(targets, c(orig.ident)), PCvalues)
-plot_df <- reshape2::melt(plot_df, id.vars = c("orig.ident"))
-plot_df$orig.ident <- factor(plot_df$orig.ident, levels = c("control", "TM+ 1hr", "TM+ 2hr", "TM+ 4hr", "TM+ 8hr"))
-colors <- sub("ME", "", as.character(levels(plot_df$variable)))
 
-wgcna_boxplot <- plot_df %>%
-  #filter(variable %in% c("MEmagenta", "MEblue", "MEturquoise")) %>%
-  ggplot(aes(x = orig.ident, y = value, fill = orig.ident)) +
-  scale_fill_manual(values = c("#fde725", "#5ec962", "#21918c", "#31688e", "#440154")) +
-  geom_boxplot(notch = FALSE) +
-  RotatedAxis() +
-  ylab("Module Eigengene") +
-  xlab("") +
-  theme_bw() +
-  theme(
-    legend.position = "none",
-    strip.text.x = element_text(face = "bold"),
-    strip.background = element_blank(),
-    axis.text.x = element_text(angle = 35, vjust = 1, hjust = 1)
-  ) +
-  facet_wrap(~variable, scales = "free", ncol = 3)
-
-wgcna_boxplot
-ggsave(plot = wgcna_boxplot, filename = paste(results_dir, "Figure_3B.png", sep = ""), width = 9, height = 4.5, device = "png", dpi = 700)
-```
 
 
 ```{r}
 geneInfo %>%
-  filter(Initially.Assigned.Module.Color == "black") %>%
-  arrange(-kMEblack)
+  filter(Initially.Assigned.Module.Color == "turquoise") %>%
+  arrange(-kMEbrown)
 
 goi <- "Insig1-1"
 
@@ -1339,7 +1421,7 @@ if (!dir.exists(enrichdir)) {
 }
 
 
-selected_colors <- c("turquoise", "magenta", "blue")
+selected_colors <- c("turquoise", "blue", "magenta")
 for (color in selected_colors) {
   current_genes <- geneInfo_annotated %>%
     filter(Initially.Assigned.Module.Color == color) %>%
@@ -1377,43 +1459,192 @@ enrich_result <- WebGestaltRBatch(
 )
 ```
 
-```{r}
+
+```{r fig.height=9, fig.width=10}
 blue_module_enrichment <- enrich_result[[1]]$enrichResult[, c(1, 2, 4, 5, 7, 8, 9, 11)] %>%
-  mutate(type = "blue_module")
+  mutate(type = "MEblue")
 
 magenta_module_enrichment <- enrich_result[[2]]$enrichResult[, c(1, 2, 4, 5, 7, 8, 9, 11)] %>%
-  mutate(type = "magenta_module")
+  mutate(type = "MEmagenta")
 
 turquoise_module_enrichment <- enrich_result[[3]]$enrichResult[, c(1, 2, 4, 5, 7, 8, 9, 11)] %>%
-  mutate(type = "turqouise_module")
+  mutate(type = "MEturquoise")
 
-enrichment_plot_magenta <- bind_rows(blue_module_enrichment[1:10, ], magenta_module_enrichment[1:10, ], turquoise_module_enrichment[1:10, ]) %>%
-  mutate(FDR = case_when(FDR == 0 ~ 2.2e-16, TRUE ~ FDR)) %>%
-  mutate(description = fct_reorder(description, enrichmentRatio)) %>%
-  filter(type == "magenta_module") %>%
-  ggplot(aes(x = enrichmentRatio, y = description, color = -log10(FDR), size = overlap)) +
-  geom_point() +
-  scale_color_viridis() +
-  theme_bw() +
-  labs(x = "Enrichment ratio", y = "", size = "Overlap")
 
-enrichment_plot_blue <- bind_rows(blue_module_enrichment[1:10, ], magenta_module_enrichment[1:10, ], turquoise_module_enrichment[1:10, ]) %>%
-  mutate(FDR = case_when(FDR == 0 ~ 2.2e-16, TRUE ~ FDR)) %>%
-  mutate(description = fct_reorder(description, enrichmentRatio)) %>%
-  filter(type == "blue_module") %>%
-  ggplot(aes(x = enrichmentRatio, y = description, color = -log10(FDR), size = overlap)) +
-  geom_point() +
-  scale_color_viridis() +
-  theme_bw() +
-  labs(x = "Enrichment ratio", y = "", size = "Overlap")
+enrichment_plot_data <- bind_rows(turquoise_module_enrichment[1:6, ], blue_module_enrichment[1:6, ], magenta_module_enrichment[1:6, ])
 
-enrichment_plot_turqouise <- bind_rows(blue_module_enrichment[1:10, ], magenta_module_enrichment[1:10, ], turquoise_module_enrichment[1:10, ]) %>%
+enrichment_plots <- enrichment_plot_data %>%
   mutate(FDR = case_when(FDR == 0 ~ 2.2e-16, TRUE ~ FDR)) %>%
-  mutate(description = fct_reorder(description, enrichmentRatio)) %>%
-  filter(type == "turqouise_module") %>%
-  ggplot(aes(x = enrichmentRatio, y = description, color = -log10(FDR), size = overlap)) +
-  geom_point() +
-  scale_color_viridis() +
+  mutate(new_description = str_wrap(description, width = 20)) %>%
+  mutate(new=factor(type,labels=c("MEturquoise","MEblue","MEmagenta"),  levels=c("MEturquoise","MEblue","MEmagenta"))) %>%
+   mutate(new_order = fct_reorder(new_description, FDR)) %>%
+  arrange(new_description, FDR) %>%
+  ggplot(aes(y = -log10(FDR), x =new_description, fill = new, label=overlap)) +
+  geom_bar(stat="identity", width = 0.4) +
+  #scale_y_continuous(expand = c(0, 0), limits = c(0, -log10(FDR)+1)) +
+  geom_text(aes(label = overlap), vjust = 0.5,hjust = 1.1, colour = "white") +
+  #scale_fill_viridis() +
   theme_bw() +
-  labs(x = "Enrichment ratio", y = "", size = "Overlap")
+  labs(x = "GO Biological Process",y = "-log10(FDR)") +
+  facet_wrap(~new, scales = "free", ncol = 3) +
+  scale_fill_manual(values=c("turquoise","blue", "magenta")) +
+  theme(strip.text.x = element_text(face = "bold"),strip.background = element_blank(), legend.position = "none",
+        axis.text.x = element_text( size = 6),
+        panel.spacing = unit(2, "lines")) +
+    scale_x_discrete(limits=rev) +
+  coord_flip()
+
+test <- wgcna_boxplot_filtered / enrichment_plots   + plot_layout(heights = c(1, 1.5))
+ggsave(plot = test, filename = paste(results_dir, "Figure 3C.png", sep = ""), width = 10, height =6.5, device = "png", dpi = 700)
 ```
+
+```{r fig.width=4}
+library(reshape2)
+library(sna)
+library(Hmisc)
+library(ggnetwork)
+library(gplots)
+
+
+numgenesingraph = 25;
+numconnections2keep = 500;
+
+TOM <- as.matrix(consTomDS)
+geneInfo=geneInfo[geneInfo$GeneSymbol!="NA",]
+
+mod ="black"
+
+colind = which(colnames(geneInfo)==paste('kME',mod,sep=''));
+rowind = which(geneInfo$Initially.Assigned.Module.Color==mod);
+
+cat(' ',length(rowind),'probes in module\n'); 
+
+submatrix = geneInfo[rowind,];
+orderind = order(submatrix[,colind],decreasing=TRUE);
+
+submatrix = submatrix[orderind[1:numgenesingraph],];
+matchind = match(submatrix$GeneSymbol,colnames(datExpr));
+reducedTOM = TOM.matrix[matchind,matchind];
+
+dim(reducedTOM)
+
+dimnames(reducedTOM) <- list(geneInfo$GeneSymbol[matchind],geneInfo$GeneSymbol[matchind])
+
+netdf <- melt(lower.tri.remove(reducedTOM)) # matrix is symmetrical, we designate half of it at NA with lower.tri.remove
+names(netdf)[1:2] <- c("gene1","gene2")
+netdf <- netdf[complete.cases(netdf),]
+netdf_sub <- subset(netdf, value > 0 & gene1!=gene2)
+netdf_sub <- subset(netdf_sub, value > quantile(netdf_sub$value,0.95))
+
+# netdf_sub <- subset(netdf_sub, gene1 %nin% names(net$colors)[which(net$colors=="grey" | net$colors=="yellow" | net$colors=="green" | net$colors=="blue" | net$colors=="red" | net$colors=="brown" | net$colors=="black")] & gene2 %nin% names(net$colors)[which(net$colors=="grey" | net$colors=="yellow" | net$colors=="green" | net$colors=="blue" | net$colors=="red" | net$colors=="brown" | net$colors=="black")])
+
+
+
+edges <- netdf_sub[,c("gene1","gene2")]
+edges$gene1 <- as.character(edges$gene1)
+edges$gene2 <- as.character(edges$gene2)
+
+edges_forplot <- network(edges,directed=F,loops=FALSE)
+x <- data.frame(vertices=network.vertex.names(edges_forplot))
+set.edge.attribute(edges_forplot,"similarity", netdf_sub$value)
+
+
+n <- ggnetwork(edges_forplot,  niter = 100, cell.jitter = 0.75)
+n$module <- net$colors[match(n$vertex.names,names(net$colors))]
+
+ucols <- unique(n$module)
+uhex <-  col2hex(ucols)
+colpal <- uhex
+names(colpal) <- ucols
+
+vertex_symbols <- n %>%
+  mutate(GeneSymbol=vertex.names) %>%
+left_join(geneInfo_annotated, n, by="GeneSymbol") %>%
+  select(symbol)
+
+
+network_turquoise <- ggplot(n, aes(x = x, y = y, xend = xend, yend = yend)) +
+  geom_edges(size=0.3,curvature=0.1,col="grey85",show.legend = F) +
+  geom_nodes(aes(colour=module, size=0.2)) +
+  geom_nodelabel(aes(label = vertex_symbols$symbol, colour=module),label.size = 0.50
+                ) +
+  #scale_size_continuous(range=c(0.1,3))+
+  scale_colour_manual(values=colpal)+
+  theme_blank()+
+  theme(legend.position = "none")
+network_turquoise
+ggsave(plot = network_turquoise, filename = paste(results_dir, "Figure 3F.png", sep = ""), width = 7, height = 4.5, device = "png", dpi = 700)
+
+merge(geneInfo_annotated, n$vertex.names)
+a <- geneInfo_annotated$symbol[geneInfo_annotated$GeneSymbol %in% n$vertex.names] 
+
+```
+
+```{r}
+geneInfo_annotated %>%
+  filter(Initially.Assigned.Module.Color == "blue") %>%
+  arrange(-kMEblue)
+```
+
+
+
+```{r}
+
+uso1_umap <- FeaturePlot(cho.combined.sct, features = c("Uso1-1"))$data %>%
+  mutate(gene = "Uso1") %>%
+  rename(expression = "Uso1.1") %>%
+  ggplot(aes(x = UMAP_1, y = UMAP_2, color = expression)) +
+  geom_point(size = 0.01) +
+  scale_color_viridis(option = "turbo", direction = 1) +
+  theme_bw() +
+  coord_fixed() +
+  #scale_x_reverse() +
+  labs(x = "UMAP 2", y = "UMAP 1", color = "Uso1 \nExpression \nlevel") +
+  theme(
+    plot.title = element_text(size = 10, face = "bold.italic"),
+    legend.position = "right",
+    legend.title = element_text(size = 8),
+    legend.text = element_text(size = 7)
+  )
+
+asap1_umap <- FeaturePlot(cho.combined.sct, features = c("Asap1-1"))$data %>%
+  mutate(gene = "Asap1") %>%
+  rename(expression = "Asap1.1") %>%
+  ggplot(aes(x = UMAP_1, y = UMAP_2, color = expression)) +
+  geom_point(size = 0.01) +
+  scale_color_viridis(option = "turbo", direction = 1) +
+  theme_bw() +
+  coord_fixed() +
+  #scale_x_reverse() +
+  labs(x = "UMAP 2", y = "UMAP 1", color = "Asap1 \nExpression \nlevel") +
+  theme(
+    plot.title = element_text(size = 10, face = "bold.italic"),
+    legend.position = "right",
+    legend.title = element_text(size = 8),
+    legend.text = element_text(size = 7)
+  )
+
+
+
+hmgcs1_umap <- FeaturePlot(cho.combined.sct, features = c("Hmgcs1-1"))$data %>%
+  mutate(gene = "Hmgcs1") %>%
+  rename(expression = "Hmgcs1.1") %>%
+  ggplot(aes(x = UMAP_1, y = UMAP_2, color = expression)) +
+  geom_point(size = 0.01) +
+  scale_color_viridis(option = "turbo", direction = 1) +
+  theme_bw() +
+  coord_fixed() +
+  #scale_x_reverse() +
+  labs(x = "UMAP 2", y = "UMAP 1", color = "Hmgcs1 \nExpression \nlevel") +
+  theme(
+    plot.title = element_text(size = 10, face = "bold.italic"),
+    legend.position = "right",
+    legend.title = element_text(size = 8),
+    legend.text = element_text(size = 7)
+  )
+
+uso1_umap + asap1_umap + hmgcs1_umap
+
+ggsave(filename = paste(results_dir, "Figure 3test.png", sep = ""), width = 10, height = 3.5, device = "png", dpi = 700)
+```
+
