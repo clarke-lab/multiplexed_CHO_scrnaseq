@@ -210,6 +210,17 @@ cell_library_1 <- subset(x = cell_library_1, features = c(1:(dim(cell_library_1)
 count_high <- quantile(cell_library_1@meta.data$nCount_RNA, rna_count_quantile_high)
 count_low <- quantile(cell_library_1@meta.data$nCount_RNA, rna_count_quantile_low)
 
+qc.nCount_RNA <- isOutlier(cell_library_1$nCount_RNA, log=TRUE, type="both")
+qc.nFeature_RNA  <- isOutlier(cell_library_1$nFeature_RNA, log=TRUE, type="both")
+
+count_low <- attr(qc.nCount_RNA , "thresholds")[1]
+count_high <- attr(qc.nCount_RNA , "thresholds")[2]
+
+gene_low <- attr(qc.nFeature_RNA , "thresholds")[1]
+gene_high <- attr(qc.nFeature_RNA , "thresholds")[2]
+
+
+
 cell_lib_1_threshold_line_values <- tibble(
   name = c("# UMIs", "# Genes", "% mito"),
   library = c("Cell library 1", "Cell library 1", "Cell library 1"),
@@ -226,8 +237,8 @@ cell_library_1_meta_data <- cell_library_1@meta.data %>%
   mutate(library = "Cell library 1")
 
 cell_library_1 <- subset(cell_library_1,
-  subset = nFeature_RNA >= 6000  &
-    nFeature_RNA <= 9000  &
+  subset = nFeature_RNA >= gene_low  &
+    nFeature_RNA <= gene_high  &
     nCount_RNA > count_low &
     nCount_RNA < count_high &
     percent.mt < mt_threshold
@@ -260,7 +271,7 @@ cell_library_1
 #                                         min.cells = min_cells_with_expression,
 #                                         min.features = min_genes_per_cell)
 
-cell_library_2 <- readRDS("~/Documents/sbo_scrnaseq_analysis/results/r_scripts/tagged_cells_lib2.rds")
+cell_library_2 <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/tagged_cells_lib2.rds")
 
 cell_library_2
 
@@ -283,6 +294,16 @@ cell_library_2 <- subset(x = cell_library_2, features = c(1:(dim(cell_library_2)
 count_high <- quantile(cell_library_2@meta.data$nCount_RNA, rna_count_quantile_high)
 count_low <- quantile(cell_library_2@meta.data$nCount_RNA, rna_count_quantile_low)
 
+qc.nCount_RNA <- isOutlier(cell_library_2$nCount_RNA, log=TRUE, type="both")
+qc.nFeature_RNA  <- isOutlier(cell_library_2$nFeature_RNA, log=TRUE, type="both")
+
+count_low <- attr(qc.nCount_RNA , "thresholds")[1]
+count_high <- attr(qc.nCount_RNA , "thresholds")[2]
+
+gene_low <- attr(qc.nFeature_RNA , "thresholds")[1]
+gene_high <- attr(qc.nFeature_RNA , "thresholds")[2]
+
+
 cell_lib_2_threshold_line_values <- tibble(
   name = c("# UMIs", "# Genes", "% mito"),
   library = c("Cell library 2", "Cell library 2", "Cell library 2"),
@@ -299,8 +320,8 @@ cell_library_2_meta_data <- cell_library_2@meta.data %>%
   mutate(library = "Cell library 2")
 
 cell_library_2 <- subset(cell_library_2,
-  subset = nFeature_RNA >= 6000  &
-    nFeature_RNA <= 9000  &
+  subset = nFeature_RNA >= gene_low &
+    nFeature_RNA <= gene_high  &
     nCount_RNA > count_low &
     nCount_RNA < count_high &
     percent.mt < mt_threshold
@@ -416,7 +437,7 @@ merged_cell_obj <- RunUMAP(object = merged_cell_obj,
 ## Cell library 1
 ### Integrate
 ```{r cell library 1 intergration, message=FALSE, warning=FALSE, include=FALSE}
-sbo_lib_1.data <- readRDS("~/Documents/sbo_scrnaseq_analysis/results/r_scripts/sbo_lib_1.data.rds")
+sbo_lib_1.data <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/sbo_lib_1.data.rds")
 
 tagged_cells_seurat_matrix1 <- as.matrix(GetAssayData(object = cell_library_1, 
                                                       slot = "counts"))
@@ -500,7 +521,7 @@ cho_cell_sbo_lib_1.subset <- subset(cho_cell_sbo_lib_1, idents = "Negative", inv
 ## Cell library 2
 ### Integrate
 ```{r message=FALSE, warning=FALSE, include=FALSE}
-sbo_lib_2.data <- readRDS("~/Documents/sbo_scrnaseq_analysis/results/r_scripts/sbo_lib_2.data.rds")
+sbo_lib_2.data <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/sbo_lib_2.data.rds")
 
 tagged_cells_seurat_matrix2 <- as.matrix(GetAssayData(object = cell_library_2, 
                                                       slot = "counts"))
@@ -877,6 +898,7 @@ figure_2e <- sbo_tagged_cells_umap_plot[[1]]$data %>%
   geom_point(size = 0.1) +
   theme_bw() +
   coord_fixed() +
+  scale_x_reverse() +
   #scale_color_brewer(palette = "Dark2",direction = 1) +
   scale_color_manual(values = viridis_cp) +
   labs(x = "UMAP 1", y = "UMAP 2", color = "Treatment", subtitle = "Classificaiton of cells by barcode") +
