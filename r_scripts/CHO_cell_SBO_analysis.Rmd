@@ -11,7 +11,7 @@ output: html_notebook
 ```{r include=FALSE}
 package_list <- c(
   "DropletUtils", "Matrix", "tidyverse", "readxl", "scales", "ggridges", "WGCNA", "scWGCNA",
-  "Seurat", "viridis", "fuzzyjoin", "WebGestaltR", "ggpubr", "patchwork"
+  "Seurat", "viridis", "fuzzyjoin", "WebGestaltR", "ggpubr", "patchwork", "scater"
 )
 
 lapply(package_list, require, character.only = TRUE)
@@ -32,7 +32,7 @@ if (!dir.exists(results_dir)) {
 qpcr_data <- read_excel("../data/qpcr_analysis.xlsx")
 
 qpcr_data <- qpcr_data %>%
-  pivot_longer(cols = c("Hspa5", "Chop", "Atf4", "sXbp1")) %>%
+  pivot_longer(cols = c("Hspa5", "Ddit3", "Atf4", "sXbp1")) %>%
   mutate(fold_change = signif(value, 2)) %>%
   mutate(Condition_edit = case_when(
     Condition == "TM-" ~ "control",
@@ -134,16 +134,12 @@ FilterGenes <- function(object, min.value = 1, min.cells = 0, genes = NULL) {
 
 ## mRNA libraries
 
-### Set filtering thresholds
+### Set fixed filtering thresholds
 here we set values for different criteria using in the analysis
 ```{r}
 min_cells_with_expression <- 50
 min_genes_per_cell <- 200
-rna_count_quantile_high <- 0.95
-rna_count_quantile_low <- 0.05
 mt_threshold <- 10
-genes_detected_lower <- 6000
-genes_detected_upper <- 9000
 ```
 
 ### load genelists
@@ -189,12 +185,6 @@ mito <- c(
 cell_library_1 <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/tagged_cells_lib1.rds")
 
 cell_library_1
-
-
-count.max.lib1 <- round(mean(cell_library_1$nCount_RNA) + 2 * sd(cell_library_1$nCount_RNA), digits = -2)
-count.min.lib1 <- round(mean(cell_library_1$nCount_RNA) - 2 * sd(cell_library_1$nCount_RNA), digits = -2)
-feat.max.lib1 <- round(mean(cell_library_1$nFeature_RNA) + 2 * sd(cell_library_1$nFeature_RNA), digits = -2)
-feat.min.lib1 <- round(mean(cell_library_1$nFeature_RNA) - 2 * sd(cell_library_1$nFeature_RNA), digits = -2)
 ```
 
 ### Preprocess
@@ -206,12 +196,9 @@ cell_library_1[["percent.mt"]] <- PercentageFeatureSet(cell_library_1, features 
 keep <- c(!rownames(cell_library_1) %in% mito)
 cell_library_1 <- subset(x = cell_library_1, features = c(1:(dim(cell_library_1)[1]))[keep])
 
-# eliminate cells based on number of umis, genes and % mtdna
-count_high <- quantile(cell_library_1@meta.data$nCount_RNA, rna_count_quantile_high)
-count_low <- quantile(cell_library_1@meta.data$nCount_RNA, rna_count_quantile_low)
-
-qc.nCount_RNA <- isOutlier(cell_library_1$nCount_RNA, log=TRUE, type="both")
-qc.nFeature_RNA  <- isOutlier(cell_library_1$nFeature_RNA, log=TRUE, type="both")
+# filter cells based on number of umis, genes and % mtdna
+qc.nCount_RNA <- isOutlier(cell_library_1$nCount_RNA, nmads = 3, log=TRUE, type="both")
+qc.nFeature_RNA  <- isOutlier(cell_library_1$nFeature_RNA, nmads = 3, log=TRUE, type="both")
 
 count_low <- attr(qc.nCount_RNA , "thresholds")[1]
 count_high <- attr(qc.nCount_RNA , "thresholds")[2]
@@ -219,13 +206,11 @@ count_high <- attr(qc.nCount_RNA , "thresholds")[2]
 gene_low <- attr(qc.nFeature_RNA , "thresholds")[1]
 gene_high <- attr(qc.nFeature_RNA , "thresholds")[2]
 
-
-
 cell_lib_1_threshold_line_values <- tibble(
   name = c("# UMIs", "# Genes", "% mito"),
   library = c("Cell library 1", "Cell library 1", "Cell library 1"),
-  lower = c(count_low, genes_detected_lower, NA),
-  upper = c(count_high, genes_detected_upper, mt_threshold)
+  lower = c(count_low, gene_low, NA),
+  upper = c(count_high, gene_high, mt_threshold)
 )
 
 cell_library_1_meta_data <- cell_library_1@meta.data %>%
@@ -274,11 +259,6 @@ cell_library_1
 cell_library_2 <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/tagged_cells_lib2.rds")
 
 cell_library_2
-
-count.max.lib2 <- round(mean(cell_library_2$nCount_RNA) + 2 * sd(cell_library_2$nCount_RNA), digits = -2)
-count.min.lib2 <- round(mean(cell_library_2$nCount_RNA) - 2 * sd(cell_library_2$nCount_RNA), digits = -2)
-feat.max.lib2 <- round(mean(cell_library_2$nFeature_RNA) + 2 * sd(cell_library_2$nFeature_RNA), digits = -2)
-feat.min.lib2 <- round(mean(cell_library_2$nFeature_RNA) - 2 * sd(cell_library_2$nFeature_RNA), digits = -2)
 ```
 
 ### Preprocess
@@ -291,11 +271,8 @@ keep <- c(!rownames(cell_library_2) %in% mito)
 cell_library_2 <- subset(x = cell_library_2, features = c(1:(dim(cell_library_2)[1]))[keep])
 
 # eliminate cells based on number of umis, genes and % mtdna
-count_high <- quantile(cell_library_2@meta.data$nCount_RNA, rna_count_quantile_high)
-count_low <- quantile(cell_library_2@meta.data$nCount_RNA, rna_count_quantile_low)
-
-qc.nCount_RNA <- isOutlier(cell_library_2$nCount_RNA, log=TRUE, type="both")
-qc.nFeature_RNA  <- isOutlier(cell_library_2$nFeature_RNA, log=TRUE, type="both")
+qc.nCount_RNA <- isOutlier(cell_library_2$nCount_RNA, nmads=3, log=TRUE, type="both")
+qc.nFeature_RNA  <- isOutlier(cell_library_2$nFeature_RNA, nmads=3, log=TRUE, type="both")
 
 count_low <- attr(qc.nCount_RNA , "thresholds")[1]
 count_high <- attr(qc.nCount_RNA , "thresholds")[2]
@@ -307,8 +284,8 @@ gene_high <- attr(qc.nFeature_RNA , "thresholds")[2]
 cell_lib_2_threshold_line_values <- tibble(
   name = c("# UMIs", "# Genes", "% mito"),
   library = c("Cell library 2", "Cell library 2", "Cell library 2"),
-  lower = c(count_low, genes_detected_lower, NA),
-  upper = c(count_high, genes_detected_upper, mt_threshold)
+  lower = c(count_low, gene_low, NA),
+  upper = c(count_high, gene_high, mt_threshold)
 )
 
 cell_library_2_meta_data <- cell_library_2@meta.data %>%
@@ -356,72 +333,7 @@ figure_s2
 ggsave(plot = figure_s2, filename = paste(results_dir, "Figure S1.png", sep = ""), width = 7, height = 5, device = "png", dpi = 700)
 ```
 
-
-## Analysis of mRNA libraries
-
-Here we analyse the cell data independently of the SBOs. 
-
-### Merge cell libraries 1 & 2
-```{r eval=FALSE, warning=FALSE, include=FALSE}
-# merge the filtered cells from lib1 and lib2
-merged_cell_obj <- merge(
-  cell_library_1,
-  y = c(cell_library_2),
-  add.cell.ids = c("library1", "library2"),
-  project = "cho_sbo"
-)
-
-merged_cell_obj
-```
-
-### Cell cycle correction and SCT
-```{r eval=FALSE, warning=FALSE, include=FALSE}
-merged_cell_obj <- SCTransform(
-  merged_cell_obj,
-  assay = "RNA",
-  new.assay.name = "SCT",
-  vars.to.regress = c("nCount_RNA", "percent.mt")
-)
-
-merged_cell_obj <- CellCycleScoring(merged_cell_obj,
-  assay = "SCT",
-  s.features = cgr_s_phase,
-  g2m.features = cgr_g2m_phase,
-  set.ident = TRUE
-)
-
-merged_cell_obj <- SCTransform(
-  merged_cell_obj,
-  assay = "RNA",
-  new.assay.name = "SCT",
-  vars.to.regress = c("S.Score", "G2M.Score", "nCount_RNA", "percent.mt"),
-  verbose = TRUE
-)
-```
-
-### Dimensionality reduction and clustering
-
-```{r eval=FALSE, fig.height=5, fig.width=8, include=FALSE}
-merged_cell_obj <- RunPCA(object = merged_cell_obj, 
-                          verbose = FALSE)
-
-ElbowPlot(merged_cell_obj)
-
-merged_cell_obj <- FindNeighbors(merged_cell_obj, 
-                                 dims = 1:16)
-
-merged_cell_obj <- FindClusters(merged_cell_obj, 
-                                resolution = 0.5)
-
-# run umap 
-merged_cell_obj <- RunUMAP(object = merged_cell_obj, 
-                           dims = 1:16)
-```
-
-
-
 # Integrate the cells and SBO tags
-
 ### Import SBO libaries 
 ```{r}
 # import the SBO data from CITE-seq count
@@ -460,11 +372,6 @@ cho_cell_sbo_lib_1 <- CreateSeuratObject(
 )
 
 cho_cell_sbo_lib_1[["percent.mt"]] <- cell_library_1$percent.mt[cho_lib1_joint_bcs]
-
-# remove mtDNA genes
-keep <- c(!rownames(cho_cell_sbo_lib_1) %in% mito)
-cho_cell_sbo_lib_1 <- subset(x = cho_cell_sbo_lib_1, 
-                        features = c(1:(dim(cho_cell_sbo_lib_1)[1]))[keep])
 
 cho_cell_sbo_lib_1@meta.data$library <- rep("library 1", dim(cho_cell_sbo_lib_1)[2])
 
@@ -543,11 +450,6 @@ cho_cell_sbo_lib_2 <- CreateSeuratObject(
 )
 
 cho_cell_sbo_lib_2[["percent.mt"]] <- cell_library_2$percent.mt[cho_lib2_joint_bcs]
-
-# remove mtDNA genes
-keep <- c(!rownames(cho_cell_sbo_lib_2) %in% mito)
-cho_cell_sbo_lib_2 <- subset(x = cho_cell_sbo_lib_2, 
-                        features = c(1:(dim(cho_cell_sbo_lib_2)[1]))[keep])
 
 cho_cell_sbo_lib_2@meta.data$library <- rep("library 2", dim(cho_cell_sbo_lib_2)[2])
 
@@ -815,7 +717,7 @@ ggsave(plot = figure_s5, filename = paste(results_dir, "Figure S3.png", sep = ""
 
 
 ```{r include=FALSE}
-cho.combined.sct <- RunUMAP(object = cho.combined.sct, dims = 1:30)
+cho.combined.sct <- RunUMAP(object = cho.combined.sct, dims = 1:40)
 ```
 
 ### Supplementary Figure 6
