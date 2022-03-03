@@ -1,0 +1,65 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r warning=FALSE}
+Cell.QC.Stat <- cell_library_2@meta.data
+max.mito.thr <- median(Cell.QC.Stat$percent.mt) + 3*mad(Cell.QC.Stat$percent.mt)
+min.mito.thr <- median(Cell.QC.Stat$percent.mt) - 3*mad(Cell.QC.Stat$percent.mt)
+
+p1 <- ggplot(Cell.QC.Stat, aes(x=nFeature_RNA, y=percent.mt)) +
+      geom_point() +
+      geom_hline(aes(yintercept = max.mito.thr), colour = "red", linetype = 2) +
+      geom_hline(aes(yintercept = min.mito.thr), colour = "red", linetype = 2) +
+      annotate(geom = "text", label = paste0(as.numeric(table(Cell.QC.Stat$percent.mt > max.mito.thr | Cell.QC.Stat$percent.mt < min.mito.thr)[2])," cells removed\n",
+                                             as.numeric(table(Cell.QC.Stat$percent.mt > max.mito.thr | Cell.QC.Stat$percent.mt < min.mito.thr)[1])," cells remain"), x = 6000, y = 0.1)
+
+ggMarginal(p1, type = "histogram", fill="lightgrey", bins=100)
+
+Cell.QC.Stat <- Cell.QC.Stat %>% filter(percent.mt < max.mito.thr) %>% filter(percent.mt > min.mito.thr)
+
+
+min.Genes.thr <- median(log10(Cell.QC.Stat$nFeature_RNA)) - 3*mad(log10(Cell.QC.Stat$nFeature_RNA))
+max.Genes.thr <- median(log10(Cell.QC.Stat$nFeature_RNA)) + 3*mad(log10(Cell.QC.Stat$nFeature_RNA))
+
+# Set hight threshold on the number of transcripts
+max.nUMI.thr <- median(log10(Cell.QC.Stat$nCount_RNA)) + 3*mad(log10(Cell.QC.Stat$nCount_RNA))
+
+p1 <- ggplot(Cell.QC.Stat, aes(x=log10(nCount_RNA), y=log10(nFeature_RNA))) +
+      geom_point() +
+      geom_smooth(method="lm") +
+      geom_hline(aes(yintercept = min.Genes.thr), colour = "green", linetype = 2) +
+      geom_hline(aes(yintercept = max.Genes.thr), colour = "green", linetype = 2) +
+      geom_vline(aes(xintercept = max.nUMI.thr), colour = "red", linetype = 2)
+
+ggMarginal(p1, type = "histogram", fill="lightgrey")
+
+
+Cell.QC.Stat <- Cell.QC.Stat %>% filter(log10(nFeature_RNA) > min.Genes.thr) %>% filter(log10(nCount_RNA) < max.nUMI.thr)
+
+lm.model <- lm(data = Cell.QC.Stat, formula = log10(nFeature_RNA) ~ log10(nCount_RNA))
+
+p2 <- ggplot(Cell.QC.Stat, aes(x=log10(nCount_RNA), y=log10(nFeature_RNA))) +
+  geom_point() +
+  geom_smooth(method="lm") +
+  geom_hline(aes(yintercept = min.Genes.thr), colour = "green", linetype = 2) +
+  geom_hline(aes(yintercept = max.Genes.thr), colour = "green", linetype = 2) +
+  geom_vline(aes(xintercept = max.nUMI.thr), colour = "red", linetype = 2) +
+  geom_abline(intercept = lm.model$coefficients[1] - 0.09 , slope = lm.model$coefficients[2], color="orange") +
+  annotate(geom = "text", label = paste0(dim(Cell.QC.Stat)[1], " QC passed cells"), x = 4, y = 3.8)
+
+ggMarginal(p2, type = "histogram", fill="lightgrey")
+```
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+

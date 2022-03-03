@@ -11,7 +11,7 @@ output: html_notebook
 ```{r include=FALSE}
 package_list <- c(
   "DropletUtils", "Matrix", "tidyverse", "readxl", "scales", "ggridges", "WGCNA", "scWGCNA",
-  "Seurat", "viridis", "fuzzyjoin", "WebGestaltR", "ggpubr", "patchwork", "scater","ggExtra", "SeuratWrappers"
+  "Seurat", "viridis", "fuzzyjoin", "WebGestaltR", "ggpubr", "patchwork", "scater"
 )
 
 lapply(package_list, require, character.only = TRUE)
@@ -145,30 +145,14 @@ mt_threshold <- 10
 ### load genelists
 ```{r include=FALSE}
 # cell cycle genes
-cgr_s_phase <- read.csv(file = "../data/s_phase_genes ens1.csv")$Gene.stable.ID
+cgr_s_phase <- read.csv(file = "../data/s_phase_genes.csv")$Seurat.gene.ID
 
-cgr_g2m_phase <- read.csv(file = "../data/g2m_phase_genes ens1.csv")$Gene.stable.ID
+cgr_g2m_phase <- read.csv(file = "../data/g2m_phase_genes.csv")$Seurat.gene.ID
 
 # mitochondrial genes
 mito <- c(
   "ND1", "ND2", "COX1", "COX2", "ATP8", "ATP6",
   "COX3", "ND3", "ND4L", "ND4", "ND5", "ND6", "CYTB"
-)
-
-mito <- c(
-"ENSCGRG00000000006.1",
-"ENSCGRG00000000010.1",
-"ENSCGRG00000000016.1",
-"ENSCGRG00000000019.1",
-"ENSCGRG00000000021.1",
-"ENSCGRG00000000022.1",
-"ENSCGRG00000000023.1",
-"ENSCGRG00000000025.1",
-"ENSCGRG00000000027.1",
-"ENSCGRG00000000028.1",
-"ENSCGRG00000000032.1",
-"ENSCGRG00000000033.1",
-"ENSCGRG00000000035.1"
 )
 ```
 
@@ -186,7 +170,7 @@ mito <- c(
 #
 # bc_rank <- barcodeRanks(tagged_cells_matrix_1, lower = 100)
 #
- bc_rank1 <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/library1_bc_rank.rds")
+ bc_rank1 <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/library1_bc_rank_current_pc.rds")
  options(repr.plot.width=9, repr.plot.height=6)
  knee_plot_lib1 <- knee_plot(bc_rank1) + labs(title="mRNA library 1") + theme_bw()
  knee_plot_lib1 
@@ -200,45 +184,21 @@ mito <- c(
 #                                         min.features = min_genes_per_cell)
 
 # line to be removed when code finished
-cell_library_1 <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/cellular_rna_lib1.rds")
+cell_library_1 <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/tagged_cells_lib1_current_pc.rds")
 
-cell_library_1
-cell_library_1[["percent.mt"]] <- PercentageFeatureSet(cell_library_1, features = mito)
-cell_library_1 <- RunMiQC(cell_library_1, percent.mt = "percent.mt", nFeature_RNA = "nFeature_RNA", posterior.cutoff = 0.9, 
-    model.slot = "flexmix_model")
-PlotMiQC(cell_library_1, color.by = "miQC.keep")
-cell_library_1 <- subset(cell_library_1, miQC.keep == "keep")
-cell_library_1
-
-qc.nCount_RNA <- isOutlier(cell_library_1$nCount_RNA, nmads = 3, log=TRUE, type="both")
-qc.nFeature_RNA  <- isOutlier(cell_library_1$nFeature_RNA, nmads = 3, log=TRUE, type="both")
-count_low <- attr(qc.nCount_RNA , "thresholds")[1]
-count_high <- attr(qc.nCount_RNA , "thresholds")[2]
-
-gene_low <- attr(qc.nFeature_RNA , "thresholds")[1]
-gene_high <- attr(qc.nFeature_RNA , "thresholds")[2]
-
-cell_library_1 <- subset(cell_library_1,
-  subset = nFeature_RNA >= gene_low  &
-    nFeature_RNA <= gene_high  &
-    nCount_RNA > count_low &
-    nCount_RNA < count_high
-)
-
-cell_library_1@meta.data$library <- rep("library 1", dim(cell_library_1)[2])
 cell_library_1
 ```
 ### Preprocess
-```{r eval=FALSE, warning=FALSE, include=FALSE}
+```{r warning=FALSE}
 # determine the number of umis originating from each cell
-
+cell_library_1[["percent.mt"]] <- PercentageFeatureSet(cell_library_1, features = mito)
 
 # remove the mito genes from further analyses
-keep <- c(!rownames(cell_library_1) %in% mito)
-cell_library_1 <- subset(x = cell_library_1, features = c(1:(dim(cell_library_1)[1]))[keep])
+#keep <- c(!rownames(cell_library_1) %in% mito)
+#cell_library_1 <- subset(x = cell_library_1, features = c(1:(dim(cell_library_1)[1]))[keep])
 
 # filter cells based on number of umis, genes and % mtdna
-
+qc.nCount_RNA <- isOutlier(cell_library_1$nCount_RNA, nmads = 3, log=TRUE, type="both")
 qc.nFeature_RNA  <- isOutlier(cell_library_1$nFeature_RNA, nmads = 3, log=TRUE, type="both")
 
 count_low <- attr(qc.nCount_RNA , "thresholds")[1]
@@ -246,9 +206,7 @@ count_high <- attr(qc.nCount_RNA , "thresholds")[2]
 
 gene_low <- attr(qc.nFeature_RNA , "thresholds")[1]
 gene_high <- attr(qc.nFeature_RNA , "thresholds")[2]
-```
 
-```{r eval=FALSE, warning=FALSE, include=FALSE}
 cell_lib_1_threshold_line_values <- tibble(
   name = c("# UMIs", "# Genes", "% mito"),
   library = c("Cell library 1", "Cell library 1", "Cell library 1"),
@@ -291,7 +249,7 @@ cell_library_1
 # options(repr.plot.width=9, repr.plot.height=6)
 # knee_plot(bc_rank)
 
- bc_rank2 <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/library2_bc_rank.rds")
+ bc_rank2 <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/library2_bc_rank_current_pc.rds")
  options(repr.plot.width=9, repr.plot.height=6)
  knee_plot_lib2 <- knee_plot(bc_rank2) + labs(title="mRNA library 2") + theme_bw()
  knee_plot_lib2 
@@ -305,41 +263,12 @@ cell_library_1
 #                                         min.cells = min_cells_with_expression,
 #                                         min.features = min_genes_per_cell)
 
-cell_library_2 <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/cellular_rna_lib2.rds")
+cell_library_2 <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/tagged_cells_lib2_current_pc.rds")
 
-cell_library_2
-
-cell_library_2[["percent.mt"]] <- PercentageFeatureSet(cell_library_2, features = mito)
-
-cell_library_2 <- RunMiQC(cell_library_2, percent.mt = "percent.mt", nFeature_RNA = "nFeature_RNA", posterior.cutoff = 0.9, 
-    model.slot = "flexmix_model")
-PlotMiQC(cell_library_2, color.by = "miQC.keep")
-cell_library_2 <- subset(cell_library_2, miQC.keep == "keep")
-
-cell_library_2
-
-qc.nCount_RNA <- isOutlier(cell_library_2$nCount_RNA, nmads= 3, log=TRUE, type="both")
-qc.nFeature_RNA  <- isOutlier(cell_library_2$nFeature_RNA, nmads= 3, log=TRUE, type="both")
-
-count_low <- attr(qc.nCount_RNA , "thresholds")[1]
-count_high <- attr(qc.nCount_RNA , "thresholds")[2]
-
-gene_low <- attr(qc.nFeature_RNA , "thresholds")[1]
-gene_high <- attr(qc.nFeature_RNA , "thresholds")[2]
-
-cell_library_2 <- subset(cell_library_2,
-  subset =
-    nFeature_RNA >= gene_low &
-    nFeature_RNA <= gene_high  &
-    nCount_RNA > count_low &
-    nCount_RNA < count_high
-)
-
-cell_library_2@meta.data$library <- rep("library 2", dim(cell_library_2)[2])
 cell_library_2
 ```
 ## Figure S1 
-```{r eval=FALSE, fig.width=7, include=FALSE}
+```{r fig.width=3, fig.width=7}
 figure_s1 <- knee_plot_lib1 + knee_plot_lib2 + plot_annotation(tag_levels = 'a')
 figure_s1
 ggsave(plot = figure_s1, filename = paste(results_dir, "Figure S1.png", sep = ""), width = 12, height = 5, device = "png", dpi = 700)
@@ -347,21 +276,13 @@ ggsave(plot = figure_s1, filename = paste(results_dir, "Figure S1.png", sep = ""
 
 
 ### Preprocess
-```{r eval=FALSE, warning=FALSE, include=FALSE}
-
-
+```{r warning=FALSE}
 # determine the number of umis originating from each cell
 cell_library_2[["percent.mt"]] <- PercentageFeatureSet(cell_library_2, features = mito)
 
-cell_library_2 <- RunMiQC(cell_library_2, percent.mt = "percent.mt", nFeature_RNA = "nFeature_RNA", posterior.cutoff = 0.9, 
-    model.slot = "flexmix_model")
-PlotMiQC(cell_library_2, color.by = "miQC.keep")
-cell_library_2 <- subset(cell_library_2, miQC.keep == "keep")
-
-
 # remove the mito genes from further analyses
-keep <- c(!rownames(cell_library_2) %in% mito)
-cell_library_2 <- subset(x = cell_library_2, features = c(1:(dim(cell_library_2)[1]))[keep])
+#keep <- c(!rownames(cell_library_2) %in% mito)
+#cell_library_2 <- subset(x = cell_library_2, features = c(1:(dim(cell_library_2)[1]))[keep])
 
 # eliminate cells based on number of umis, genes and % mtdna
 qc.nCount_RNA <- isOutlier(cell_library_2$nCount_RNA, nmads= 3, log=TRUE, type="both")
@@ -401,7 +322,7 @@ cell_library_2@meta.data$library <- rep("library 2", dim(cell_library_2)[2])
 cell_library_2
 ```
 
-```{r eval=FALSE, fig.height=5, fig.width=6, message=FALSE, warning=FALSE, include=FALSE}
+```{r fig.height=5, fig.width=6, message=FALSE, warning=FALSE}
 threshold_line_values <- bind_rows(cell_lib_1_threshold_line_values, cell_lib_2_threshold_line_values)
 
 figure_s2 <- bind_rows(cell_library_1_meta_data, cell_library_2_meta_data) %>%
@@ -442,15 +363,15 @@ ggsave(plot = figure_s2, filename = paste(results_dir, "Figure S2.png", sep = ""
 ## Cell library 1
 ### Integrate
 ```{r cell library 1 intergration, message=FALSE, warning=FALSE, include=FALSE}
-sbo_lib_1.data <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/sbo_lib_1.data.rds")
+sbo_lib_1.data <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/sbo_lib_1.data_current_pc.rds")
 
 tagged_cells_seurat_matrix1 <- as.matrix(GetAssayData(object = cell_library_1, 
                                                       slot = "counts"))
 
-#colnames(tagged_cells_seurat_matrix1) <- gsub("-1", "", colnames(tagged_cells_seurat_matrix1))
 # overlap the cell labels from the cellular and SBO libraries
 cho_lib1_joint_bcs <- intersect(colnames(sbo_lib_1.data), 
                                 colnames(tagged_cells_seurat_matrix1))
+
 
 paste(length(cho_lib1_joint_bcs) ," matched for mRNA and SBO library 1" )
 
@@ -504,7 +425,7 @@ eval_pq_lib1_plot <- eval_pq_lib1 %>%
   theme_bw() +
   labs(y="# Cells", x="HTODemux positive quantile treshold", color="SBO identification", title="SBO library 1")
 cho_cell_sbo_lib_1 <- HTODemux(cho_cell_sbo_lib_1, assay = "SBO", 
-                          positive.quantile = 0.965)
+                          positive.quantile = 0.975)
 
 
 # show table
@@ -521,12 +442,10 @@ cho_cell_sbo_lib_1.subset <- subset(cho_cell_sbo_lib_1, idents = "Negative", inv
 ## Cell library 2
 ### Integrate
 ```{r message=FALSE, warning=FALSE, include=FALSE}
-sbo_lib_2.data <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/sbo_lib_2.data.rds")
+sbo_lib_2.data <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/sbo_lib_2.data_current_pc.rds")
 
 tagged_cells_seurat_matrix2 <- as.matrix(GetAssayData(object = cell_library_2, 
                                                       slot = "counts"))
-
-#colnames(tagged_cells_seurat_matrix2) <- gsub("-1", "", colnames(tagged_cells_seurat_matrix2))
 
 # overlap the cell labels from the cellular and SBO libraries
 cho_lib2_joint_bcs <- intersect(colnames(sbo_lib_2.data), 
@@ -580,12 +499,12 @@ eval_pq_lib2_plot <- eval_pq_lib2 %>%
   ggplot(aes(x=threshold, y=cells, color=SBO_classification.global)) +
            geom_point() +
            geom_line() + 
-  geom_vline(xintercept = 0.97, linetype=11, size=0.2) +
+  geom_vline(xintercept = 0.975, linetype=11, size=0.2) +
   theme_bw() +
   labs(y="# Cells", x="HTODemux positive quantile treshold", color="SBO identification", title="SBO library 2")
 
 cho_cell_sbo_lib_2 <- HTODemux(cho_cell_sbo_lib_2, assay = "SBO", 
-                          positive.quantile = 0.95)
+                          positive.quantile = 0.975)
 
 # show table
 table(cho_cell_sbo_lib_2$SBO_maxID, cho_cell_sbo_lib_2$SBO_classification.global)
@@ -752,45 +671,29 @@ cho.combined.sct <- merge(cho_1.singlet,
   project = "TM_analysis", merge.data = TRUE
 )
 
-
-# cho.combined.sct <- CellCycleScoring(
-#   cho.combined.sct,
-#   s.features = cgr_s_phase,
-#   g2m.features = cgr_g2m_phase,
-#   set.ident = TRUE
-# )
-
-# cho.combined.sct <- cho.combined.sct %>%
-#   NormalizeData() %>%
-#   FindVariableFeatures() %>%
-#   ScaleData(vars.to.regress = c("S.Score", "G2M.Score","nFeature_RNA", "percent.mt", "nCount_RNA"))
-  
-  
-
-
 table(cho.combined.sct$SBO_maxID, cho.combined.sct$SBO_classification.global)
 
 cho.combined.sct <- SCTransform(
   cho.combined.sct,
   assay = "RNA",
   new.assay.name = "SCT",
-  vars.to.regress = c("nFeature_RNA"), variable.features.n = 4000
+  #vars.to.regress = c("percent.mt")
 )
 
-cho.combined.sct <- CellCycleScoring(
-  cho.combined.sct,
+cho.combined.sct <- CellCycleScoring(cho.combined.sct,
   assay = "SCT",
   s.features = cgr_s_phase,
   g2m.features = cgr_g2m_phase,
-  set.ident = TRUE
+  set.ident = TRUE,
+
 )
 
 cho.combined.sct <- SCTransform(
   cho.combined.sct,
   assay = "RNA",
   new.assay.name = "SCT",
-  vars.to.regress = c("S.Score", "G2M.Score","nFeature_RNA"), variable.features.n = 4000,
-  verbose = TRUE
+  vars.to.regress = c("S.Score", "G2M.Score"),
+  verbose = TRUE,
   
 )
 
@@ -804,9 +707,6 @@ sample_information <- cho.combined.sct@meta.data %>%
   ))
 
 cho.combined.sct <- AddMetaData(cho.combined.sct, metadata = sample_information$treatment, "treatment")
-
-# VlnPlot(cell_library_2, group.by = "orig.ident", features = "nFeature_RNA", pt.size = 0.1, ncol = 3) +
-#     NoLegend()
 ```
 
 ## Visualisation of tagged cells
@@ -832,8 +732,8 @@ ggsave(plot = figure_s5, filename = paste(results_dir, "Figure S5.png", sep = ""
 
 
 ```{r include=FALSE}
-cho.combined.sct <- RunUMAP(object = cho.combined.sct, 
-                            dims = 1:30)
+cho.combined.sct <- RunUMAP(object = cho.combined.sct, dims = 1:30
+                            )
 ```
 
 ### Supplementary Figure 6
@@ -934,7 +834,7 @@ ggsave(plot = figure_s7 , filename = paste(results_dir, "Figure S7.png", sep = "
 ```
 ## Visualise known ER stress marker genes 
 ### UMAP
-```{r eval=FALSE, include=FALSE}
+```{r}
 hspa5_umap <- FeaturePlot(cho.combined.sct, features = c("Hspa5-1"))$data %>%
   mutate(gene = "Hspa5") %>%
   rename(expression = "Hspa5.1") %>%
@@ -988,7 +888,7 @@ atf4_umap <- FeaturePlot(cho.combined.sct, features = c("Atf4-1"))$data %>%
 ```
 
 #### Violin plots
-```{r eval=FALSE, include=FALSE}
+```{r}
 standard_normalisation <- NormalizeData(cho.combined.sct, normalization.method = "LogNormalize", scale.factor = 10000, assay = "RNA")
 
 hspa5_violin <- VlnPlot(standard_normalisation, features = c("Hspa5-1"), group.by = "treatment", assay = "RNA")$data %>%
@@ -1050,7 +950,7 @@ ddit3_violin <- VlnPlot(standard_normalisation, features = c("Ddit3-1"), group.b
 ```
 
 ### Manuscript Figure 
-```{r eval=FALSE, include=FALSE}
+```{r}
 marker_gene_umap <- (((hspa5_violin / hspa5_umap + plot_layout(heights = c(0.8, 1)))) |
   (atf4_violin / atf4_umap + plot_layout(heights = c(0.8, 1))) |
   (ddit3_violin / ddit3_umap + plot_layout(heights = c(0.7, 1))))
@@ -1075,19 +975,28 @@ for (group in unique(cho.combined.sct$treatment)) {
   cur_metacell_seurat <- scWGCNA::construct_metacells(
     cur_seurat,
     name = group,
-    k = 75,
+    k = 50,
     reduction = "umap",
-    assay = "SCT", slot = "data"
+    assay = "RNA", slot = "data"
   )
   seurat_list[[group]] <- cur_metacell_seurat
 }
 
 metacell_seurat <- merge(seurat_list[[1]], seurat_list[2:length(seurat_list)])
 
+metacell_subset <- ScaleData(metacell_seurat, features = rownames(metacell_seurat))
+
+
+metacell_subset <- RunPCA(metacell_subset, features = rownames(metacell_subset))
+ElbowPlot(metacell_subset)
+
+
+metacell_subset <- RunUMAP(metacell_subset, reduction = "pca", dims = 1:8)
+metacell_umap <- DimPlot(metacell_subset, reduction = "umap", label = FALSE)
 ```
 
 ### Pseudobulk UMAP
-```{r eval=FALSE, include=FALSE}
+```{r}
 figure_3a <- metacell_umap[[1]]$data %>%
   ggplot(aes(x = UMAP_1, y = UMAP_2, color = ident)) +
   geom_point(size = 0.1) +
@@ -1126,11 +1035,9 @@ powerTable <- list(
     powerVector = powers,
     verbose = 100,
     networkType = "signed",
-    corFnc = "cor"
+    corFnc = "bicor"
   )[[2]]
 )
-
-
 
 figure_s8a <- powerTable$data %>%
   ggplot(aes(x=Power, y=SFT.R.sq)) +
@@ -1166,7 +1073,7 @@ ggsave(plot = figure_s8, filename = paste(results_dir, "Figure S8.png", sep = ""
 ```
 ### Identify gene modules
 ```{r}
-softPower <- 8
+softPower <- 22
 
 nSets <- 1
 setLabels <- "treatment"
@@ -1194,7 +1101,7 @@ net <- blockwiseConsensusModules(multiExpr,
   deepSplit = 4,
   pamStage = FALSE,
   detectCutHeight = 0.995, 
-  minModuleSize = 50,
+  minModuleSize = 100,
   mergeCutHeight = 0.2,
   saveConsensusTOMs = TRUE,
   consensusTOMFilePattern = "ConsensusTOM-block.%b.rda"
@@ -1251,17 +1158,15 @@ plotDendroAndColors(consTree, moduleColors, "Module colors",
 ```
 
 ```{r}
- a <- geneInfo %>%
-   filter(Initially.Assigned.Module.Color == "magenta") %>%
-   arrange(-kMEmagenta)
-
-View(a)
+ geneInfo %>%
+   filter(Initially.Assigned.Module.Color == "green") %>%
+   arrange(-kMEgreen)
 ```
 
 
 ### Relationship between coexpressed modules and TM
 ```{r fig.height=10, fig.width=8}
-plot_df <- cbind(dplyr::select(targets, c(orig.ident)), PCvalues)
+plot_df <- cbind(select(targets, c(orig.ident)), PCvalues)
 plot_df <- reshape2::melt(plot_df, id.vars = c("orig.ident"))
 plot_df$orig.ident <- factor(plot_df$orig.ident, levels = c("control", "TM+ 1hr", "TM+ 2hr", "TM+ 4hr", "TM+ 8hr"))
 colors <- sub("ME", "", as.character(levels(plot_df$variable)))
@@ -1289,8 +1194,8 @@ ggsave(plot = wgcna_boxplot_full, filename = paste(results_dir, "Figure S9.png",
 
 ```{r}
 wgcna_boxplot_filtered <- plot_df %>%
-  filter(variable %in% c("MEturquoise", "MEmagenta", "MEyellow")) %>%
-  mutate(new=factor(variable,labels=c("MEturquoise","MEmagenta","MEyellow"),  levels=c("MEturquoise","MEmagenta","MEyellow"))) %>%
+  filter(variable %in% c("MEturquoise", "MEblue", "MEgreen")) %>%
+  mutate(new=factor(variable,labels=c("MEturquoise","MEblue","MEgreen"),  levels=c("MEturquoise","MEblue","MEgreen"))) %>%
   ggplot(aes(x = orig.ident, y = value, fill = orig.ident)) +
   scale_fill_manual(values = c("#fde725", "#5ec962", "#21918c", "#31688e", "#440154")) +
   #geom_violin(draw_quantiles = T, width=0.4) +
@@ -1419,25 +1324,14 @@ if (!dir.exists(enrichdir)) {
   dir.create(enrichdir)
 }
 
-library(biomaRt)
-ensembl <- useEnsembl(biomart = "ensembl", 
-                      dataset = "cgpicr_gene_ensembl",
-                      version = "102")
 
-
-
-selected_colors <- unique(geneInfo$Initially.Assigned.Module.Color)
+selected_colors <- unique(geneInfo_annotated$Initially.Assigned.Module.Color)
 for (color in selected_colors) {
-  current_genes <- geneInfo %>%
+  current_genes <- geneInfo_annotated %>%
     filter(Initially.Assigned.Module.Color == color) %>%
-    dplyr::select(GeneSymbol)
+    select(symbol)
 
-  magenta_biomart <- getBM(attributes = c('ensembl_gene_id_version', 'external_gene_name'),
-      filters = 'ensembl_gene_id_version',
-      values = current_genes$GeneSymbol, 
-      mart = ensembl)
-  
-  write(magenta_biomart$external_gene_name, file = paste0(enrichdir, color, "_genes.txt"))
+  write(current_genes$symbol, file = paste0(enrichdir, color, "_genes.txt"))
 }
 
 enrich_result <- WebGestaltRBatch(
