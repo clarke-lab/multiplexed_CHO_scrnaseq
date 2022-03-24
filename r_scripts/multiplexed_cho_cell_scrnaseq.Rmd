@@ -171,7 +171,7 @@ knee_plot <- function(bc_rank) {
 #                                         min.features = min_genes_per_cell)
 ```
 
-join the two knee plots to create figure S1
+Join the two knee plots to create figure S1
 ```{r fig.height=4, fig.width=8}
 knee_plot_lib1 + knee_plot_lib2 + plot_annotation(tag_levels = "a")
 
