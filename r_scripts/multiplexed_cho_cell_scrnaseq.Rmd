@@ -41,10 +41,13 @@ qpcr_data <- read_excel("../data/qpcr_analysis.xlsx")
 
 qpcr_data <- qpcr_data %>%
   pivot_longer(cols = c("Hspa5", "Ddit3", "Atf4", "sXbp1")) %>%
-  mutate(fold_change = signif(value, 2)) 
+  mutate(fold_change = signif(value, 2))
 
-
-col_pal_vidiris <- c("#fde725", "#5ec962", "#21918c", "#31688e", "#440154")
+# define color pa
+col_pal_vidiris <- c(
+  "#fde725", "#5ec962", "#21918c",
+  "#31688e", "#440154"
+)
 
 qpcr_data %>%
   ggboxplot(
@@ -53,7 +56,8 @@ qpcr_data %>%
   ) +
   geom_point(
     data = qpcr_data, aes(x = Condition, y = fold_change),
-    position = position_jitter(width = 0), size = 0.2, color = "grey"
+    position = position_jitter(width = 0),
+    size = 0.2, color = "grey"
   ) +
   labs(x = "", y = "Fold change") +
   facet_wrap(~name, scales = "free_y", nrow = 2) +
@@ -65,12 +69,12 @@ qpcr_data %>%
     panel.spacing = unit(1, "lines"),
     axis.text.x = element_text(angle = 35, vjust = 1, hjust = 1)
   ) +
-  # axis.text.x = element_text(angle=35, hjust=1, size = 8)) +
   scale_y_continuous(breaks = pretty_breaks(n = 4, min.n = 0))
 
-
-ggsave(filename = paste(results_dir, "Figure 1A.png", sep = ""), 
-       width = 4, height = 4, device = "png", dpi = 700)
+ggsave(
+  filename = paste(results_dir, "Figure 1A.png", sep = ""),
+  width = 4, height = 4, device = "png", dpi = 700
+)
 ```
 
 ## Cellular scRNA-seq pre-processing
@@ -167,6 +171,7 @@ knee_plot <- function(bc_rank) {
 #                                         min.features = min_genes_per_cell)
 ```
 
+join the two knee plots to create figure S1
 ```{r fig.height=4, fig.width=8}
 knee_plot_lib1 + knee_plot_lib2 + plot_annotation(tag_levels = "a")
 
@@ -174,8 +179,7 @@ ggsave(filename = paste(results_dir, "Figure S1.png", sep = ""),
        width = 8, height = 4, device = "png", dpi = 700)
 ```
 
-
-
+Specify the mitochondrial protein coding genes from the CHO-K1 genome
 ```{r include=FALSE}
 mito <- c("ENSCGRG00000000006.1","ENSCGRG00000000010.1","ENSCGRG00000000016.1",
           "ENSCGRG00000000019.1","ENSCGRG00000000021.1","ENSCGRG00000000022.1",
