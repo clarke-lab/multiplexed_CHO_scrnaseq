@@ -43,14 +43,6 @@ qpcr_data <- qpcr_data %>%
   pivot_longer(cols = c("Hspa5", "Ddit3", "Atf4", "sXbp1")) %>%
   mutate(fold_change = signif(value, 2)) 
 
-# %>%
-#   mutate(Condition_edit = case_when(
-#     Condition == "TM-" ~ "control",
-#     Condition == "TM+ 1hr" ~ "1hr",
-#     Condition == "TM+ 2hr" ~ "2hr",
-#     Condition == "TM+ 4hr" ~ "4hr",
-#     Condition == "TM+ 8hr" ~ "8hr"
-#   ))
 
 col_pal_vidiris <- c("#fde725", "#5ec962", "#21918c", "#31688e", "#440154")
 
