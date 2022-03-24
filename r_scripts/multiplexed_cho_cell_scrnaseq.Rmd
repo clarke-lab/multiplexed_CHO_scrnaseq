@@ -1,18 +1,23 @@
 ---
 title: "Multiplexed CHO single cell RNA-seq"
 output:
+  html_notebook: 
+    toc: yes
+    df_print: paged
+    code_folding: none
   html_document:
     toc: yes
     df_print: paged
-  html_notebook:
-    toc: yes
+    code_folding: none
 ---
 
 ## Introduction
 
-### Preparate for analysis
 
-```{r message=FALSE, include=FALSE}
+
+## Preparate for analysis
+
+```{r preparation, echo=T, results='hide'}
 #load packages
 package_list <- c(
   "DropletUtils", "Matrix", "tidyverse", "readxl", "writexl", "scales", 
@@ -34,9 +39,9 @@ if (!dir.exists(results_dir)) {
 
 ## qPCR analysis of gene expression
 
-Prior to running single cell analysis, qPCR was carried was to confirm that the expression of 3 genes and a spliced isoform of XBP1 were upregulated
+Prior to running single cell analysis, qPCR was carried was to confirm that the expression of 3 genes and a spliced isoform of XBP1 were upregulated following tunicamycin addition
 
-```{r, fig.align="center", fig.height=4, fig.width=4, fig.cap="Figure: Here is a really important caption."}
+```{r qpcr}
 qpcr_data <- read_excel("../data/qpcr_analysis.xlsx")
 
 qpcr_data <- qpcr_data %>%
@@ -77,27 +82,23 @@ ggsave(
 )
 ```
 
-## Cellular scRNA-seq pre-processing
+## Preprocess cellular RNA libraries 
 
-Importing counts from Kallisto \| Bustools as described in the \[tutorial\] (<https://www.kallistobus.tools/tutorials/kb_getting_started/r/kb_intro_2_r/>)
+Load the data from GEM well 1 and GEM well 2
+```{r load_rna_data}
+# GEM well 1 
+bc_rank1 <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/library1_bc_rank.rds")
+cell_library_1 <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/cellular_rna_lib1.rds")
 
-```{r}
-# import counts
-read_count_output <- function(dir, name) {
-  dir <- normalizePath(dir, mustWork = TRUE)
-  m <- readMM(paste0(dir, "/", name, ".mtx"))
-  m <- Matrix::t(m)
-  m <- as(m, "dgCMatrix")
-  # The matrix read has cho.combined.cds in rows
-  ge <- ".genes.txt"
-  genes <- readLines(file(paste0(dir, "/", name, ge)))
-  barcodes <- readLines(file(paste0(dir, "/", name, ".barcodes.txt")))
-  colnames(m) <- barcodes
-  rownames(m) <- genes
-  return(m)
-}
+# GEM well 1
+bc_rank2 <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/library2_bc_rank.rds")
+cell_library_2 <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/cellular_rna_lib2.rds")
+```
 
-# Knee plot for filtering empty droplets
+
+Show the knee plots and filtering of empty droplets. Function available from the Kallisto | Bustools [tutorial](<https://www.kallistobus.tools/tutorials/kb_getting_started/r/kb_intro_2_r/>)
+```{r knee_plot, fig.height=4, fig.width=8}
+# function to construct the plot
 knee_plot <- function(bc_rank) {
   knee_plt <- tibble(
     rank = bc_rank[["rank"]],
@@ -109,6 +110,7 @@ knee_plot <- function(bc_rank) {
     inflection = metadata(bc_rank)[["inflection"]],
     rank_cutoff = max(bc_rank$rank[bc_rank$total > metadata(bc_rank)[["inflection"]]])
   )
+  
   p <- ggplot(knee_plt, aes(total, rank)) +
     geom_line() +
     geom_hline(aes(yintercept = rank_cutoff), data = annot, linetype = 2) +
@@ -119,152 +121,115 @@ knee_plot <- function(bc_rank) {
     labs(y = "Rank", x = "Total UMIs")
   return(p)
 }
-```
 
+# plot
+knee_plot_lib1 <- knee_plot(bc_rank1) + 
+  labs(title = "Cellular RNA library 1") + theme_bw()
 
-```{r}
-# import KB counts
-# tagged_cells_matrix_1 <- read_count_output("../../kallisto_counts/multiplexed_scRNAseq_data_1/counts_unfiltered/",
-#                                            name = "cells_x_genes")
-#
-# tot_counts <- Matrix::colSums(tagged_cells_matrix_1)
-# summary(tot_counts)
-#
-# bc_rank <- barcodeRanks(tagged_cells_matrix_1, lower = 100)
-#
- bc_rank1 <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/library1_bc_rank.rds")
- knee_plot_lib1 <- knee_plot(bc_rank1) + labs(title="Cellular RNA library 1") + theme_bw()
+knee_plot_lib2 <- knee_plot(bc_rank2) + 
+  labs(title = "Cellular RNA library 2") + theme_bw()
 
-# tagged_cells_matrix_1 <- tagged_cells_matrix_1[, tot_counts > metadata(bc_rank)$inflection]
-# #tagged_cells_matrix_1 <- tagged_cells_matrix_1[Matrix::rowSums(tagged_cells_matrix_1) > 0,]
-# dim(tagged_cells_matrix_1)
-#
-# # create a seurat object
-# cell_library_1 <- CreateSeuratObject(counts = tagged_cells_matrix_1,
-#                                         min.cells = min_cells_with_expression,
-#                                         min.features = min_genes_per_cell)
-```
-
-
-```{r}
-# tagged_cells_matrix_2 <- read_count_output("../../kallisto_counts/multiplexed_scRNAseq_data_2/counts_unfiltered/",
-#                                            name = "cells_x_genes")
-
-# tot_counts <- Matrix::colSums(tagged_cells_matrix_2)
-# summary(tot_counts)
-#
-# bc_rank <- barcodeRanks(tagged_cells_matrix_2, lower = 100)
-#
-# options(repr.plot.width=9, repr.plot.height=6)
-# knee_plot(bc_rank)
-
- bc_rank2 <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/library2_bc_rank.rds")
- knee_plot_lib2 <- knee_plot(bc_rank2) + labs(title="Cellular RNA library 2") + theme_bw() 
-
-# tagged_cells_matrix_2 <- tagged_cells_matrix_2[, tot_counts > metadata(bc_rank)$inflection]
-# #tagged_cells_matrix_1 <- tagged_cells_matrix_1[Matrix::rowSums(tagged_cells_matrix_1) > 0,]
-# dim(tagged_cells_matrix_2)
-#
-# # create a seurat object
-# tagged_cells_lib2 <- CreateSeuratObject(counts = tagged_cells_matrix_2,
-#                                         min.cells = min_cells_with_expression,
-#                                         min.features = min_genes_per_cell)
-```
-
-Join the two knee plots to create figure S1
-```{r fig.height=4, fig.width=8}
+# join and tag
 knee_plot_lib1 + knee_plot_lib2 + plot_annotation(tag_levels = "a")
 
-ggsave(filename = paste(results_dir, "Figure S1.png", sep = ""), 
-       width = 8, height = 4, device = "png", dpi = 700)
+# save
+ggsave(
+  filename = paste(results_dir, "Figure S1.png", sep = ""),
+  width = 8, height = 4, device = "png", dpi = 700
+)
 ```
-
-Specify the mitochondrial protein coding genes from the CHO-K1 genome
-```{r include=FALSE}
-mito <- c("ENSCGRG00000000006.1","ENSCGRG00000000010.1","ENSCGRG00000000016.1",
-          "ENSCGRG00000000019.1","ENSCGRG00000000021.1","ENSCGRG00000000022.1",
-          "ENSCGRG00000000023.1","ENSCGRG00000000025.1","ENSCGRG00000000027.1",
-          "ENSCGRG00000000028.1","ENSCGRG00000000032.1","ENSCGRG00000000033.1",
-          "ENSCGRG00000000035.1")
-```
-
-### Define filtering function
-
-```{r}
+Next, we create a function to filter cells from both libraries based on the number of UMIs mapping to mtDNA as well as the number of genes and UMIs detected
+```{r rna_filter_function}
 filter_cells <- function(object) {
   
+  # run miQC
   object <- RunMiQC(object,
     percent.mt = "percent.mt",
     nFeature_RNA = "nFeature_RNA",
     posterior.cutoff = 0.9,
     model.slot = "flexmix_model"
   )
-
-  mtdna_plot <- PlotMiQC(object, color.by = "miQC.keep")
-
-  object <- subset(object, subset = miQC.keep == "keep")
-     
-  mtdna_plot$layers[c(1,2,3)] <- NULL
-  mtdna_plot <- mtdna_plot + theme_bw() + 
-    scale_color_manual(values = c("#888888","#117733")) +
-    #scale_color_brewer(palette = "Dark2") + 
-    geom_point(size = 0.2, alpha=0.5) + 
-    labs(x="# Genes",y="% mtDNA UMIs", color="") +
-    guides(colour = guide_legend(override.aes = list(size=5))) + 
-  annotate("text", -Inf, Inf, hjust = -1.70, vjust = 1.5, color="#117733", 
-           label= paste0(dim(object)[2], " cells retained")) +
-      theme(panel.grid.major = element_blank(), 
-            panel.grid.minor = element_blank(),
-            legend.position = "bottom")
   
-  # cutoffs for nUMIs
+  # capture the plot
+  mtdna_plot <- PlotMiQC(object, color.by = "miQC.keep")
+  
+  # remove poor quality cells
+  object <- subset(object, subset = miQC.keep == "keep")
+  
+  # modify miQC output plot
+  mtdna_plot$layers[c(1, 2, 3)] <- NULL
+  mtdna_plot <- mtdna_plot + theme_bw() +
+    scale_color_manual(values = c("#888888", "#117733")) +
+    # scale_color_brewer(palette = "Dark2") +
+    geom_point(size = 0.2, alpha = 0.5) +
+    labs(x = "# Genes", y = "% mtDNA UMIs", color = "") +
+    guides(colour = guide_legend(override.aes = list(size = 5))) +
+    annotate("text", -Inf, Inf,
+      hjust = -1.70, vjust = 1.5, color = "#117733",
+      label = paste0(dim(object)[2], " cells retained")
+    ) +
+    theme(
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      legend.position = "bottom"
+    )
+
+  # thresholds for nUMI
   log_umi_counts <- log10(object@meta.data$nCount_RNA)
   low_count_threshold <- median(log_umi_counts) - (3 * mad(log_umi_counts))
   high_count_threshold <- median(log_umi_counts) + (3 * mad(log_umi_counts))
 
-  # cutoffs for detected genes
+  # thresholds for detected genes
   log_detect_genes <- log10(object@meta.data$nFeature_RNA)
   low_feature_threshold <- median(log_detect_genes) - (3 * mad(log_detect_genes))
   high_feature_threshold <- median(log_detect_genes) + (3 * mad(log_detect_genes))
 
+  # plot data for UMI and detected genes results
   umi_v_feature_plot_data <- object@meta.data %>%
-    mutate(miQC.keep = case_when(nFeature_RNA > 10^low_feature_threshold &
-      nFeature_RNA < 10^high_feature_threshold &
-      nCount_RNA > 10^low_count_threshold &
-      nCount_RNA < 10^high_count_threshold ~ "keep",
-      TRUE ~ "discard")) 
+    mutate(miQC.keep = case_when(
+      nFeature_RNA > 10^low_feature_threshold &
+        nFeature_RNA < 10^high_feature_threshold &
+        nCount_RNA > 10^low_count_threshold &
+        nCount_RNA < 10^high_count_threshold ~ "keep",
+      TRUE ~ "discard"
+    ))
   
+  # filter cells
   object <- subset(
     object,
     nFeature_RNA > 10^low_feature_threshold &
       nFeature_RNA < 10^high_feature_threshold &
       nCount_RNA > 10^low_count_threshold &
       nCount_RNA < 10^high_count_threshold
+  )
+
+  # plot UMI and detected genes results
+  umi_v_feature_plot <- umi_v_feature_plot_data %>%
+    ggplot(aes(x = log10(nCount_RNA), y = log10(nFeature_RNA), color = miQC.keep)) +
+    geom_point(size = 0.2, alpha = 0.5) +
+    scale_color_manual(values = c("#888888", "#117733")) +
+    # geom_smooth(method = "lm") +
+    geom_hline(aes(yintercept = low_feature_threshold), colour = "grey", linetype = 2) +
+    geom_hline(aes(yintercept = high_feature_threshold), colour = "grey", linetype = 2) +
+    geom_vline(aes(xintercept = high_count_threshold), colour = "grey", linetype = 2) +
+    geom_vline(aes(xintercept = low_count_threshold), colour = "grey", linetype = 2) +
+    theme_bw() +
+    labs(x = "Log10 # UMIs", y = "Log10 # Genes", color = "") +
+    guides(colour = guide_legend(override.aes = list(size = 5))) +
+    annotate("text", -Inf, Inf,
+      hjust = -0.1, vjust = 1.5, color = "#117733",
+      label = paste0(dim(object)[2], " cells retained")
+    ) +
+    theme(
+      panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+      legend.position = "bottom"
     )
 
-  
-  
-    umi_v_feature_plot <- umi_v_feature_plot_data %>%
-    ggplot(aes(x = log10(nCount_RNA), y = log10(nFeature_RNA), color=miQC.keep)) +
-    geom_point(size = 0.2, alpha=0.5) +
-    scale_color_manual(values = c("#888888","#117733")) +
-    #geom_smooth(method = "lm") +
-     geom_hline(aes(yintercept = low_feature_threshold), colour = "grey", linetype = 2) +
-     geom_hline(aes(yintercept = high_feature_threshold), colour = "grey", linetype = 2) +
-     geom_vline(aes(xintercept = high_count_threshold), colour = "grey", linetype = 2) +
-     geom_vline(aes(xintercept = low_count_threshold), colour = "grey", linetype = 2) +
-    theme_bw() +
-    labs(x="Log10 # UMIs", y = "Log10 # Genes", color="") +
-    guides(colour = guide_legend(override.aes = list(size=5))) + 
-    annotate("text", -Inf, Inf, hjust =-0.1, vjust = 1.5, color="#117733", 
-             label= paste0(dim(object)[2], " cells retained")) +
-      theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-            legend.position = "bottom")
 
-  
   # show the filtered cell summary
   print(object)
 
+  # results list
   result_list <- list(
     "mtdna_plot" = mtdna_plot,
     "filtered_object" = object,
@@ -276,32 +241,40 @@ filter_cells <- function(object) {
 }
 ```
 
-### Library 1
+Specify the mitochondrial protein coding genes from the CHO-K1 genome
+```{r mito_gene_list, include=FALSE}
+mito <- c("ENSCGRG00000000006.1","ENSCGRG00000000010.1","ENSCGRG00000000016.1",
+          "ENSCGRG00000000019.1","ENSCGRG00000000021.1","ENSCGRG00000000022.1",
+          "ENSCGRG00000000023.1","ENSCGRG00000000025.1","ENSCGRG00000000027.1",
+          "ENSCGRG00000000028.1","ENSCGRG00000000032.1","ENSCGRG00000000033.1",
+          "ENSCGRG00000000035.1")
+```
 
-```{r warning=FALSE}
-cell_library_1 <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/cellular_rna_lib1.rds")
-
-cell_library_1[["percent.mt"]] <- PercentageFeatureSet(cell_library_1, features = mito)
-
+Preprocess GEM well 1 RNA data
+```{r preprocess_rna_1, warning=FALSE}
+# determine the percentage mapping to mtDNA
+cell_library_1[["percent.mt"]] <- PercentageFeatureSet(cell_library_1, 
+                                                       features = mito)
+# preprocess
 cell_rna_library_1_filter_output <- filter_cells(cell_library_1)
 
 cell_library_1 <- cell_rna_library_1_filter_output$filtered_object
-
 ```
 
-### Library 2
-
-```{r}
-cell_library_2 <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/cellular_rna_lib2.rds")
-
-cell_library_2[["percent.mt"]] <- PercentageFeatureSet(cell_library_2, features = mito)
-
+Preprocess GEM well 2 RNA data
+```{r preprocess_rna_2, warning=FALSE}
+# determine the percentage mapping to mtDNA
+cell_library_2[["percent.mt"]] <- PercentageFeatureSet(cell_library_2, 
+                                                       features = mito)
+# preprocess
 cell_rna_library_2_filter_output <- filter_cells(cell_library_2)
 
 cell_library_2 <- cell_rna_library_2_filter_output$filtered_object
 ```
 
-```{r fig.height=8, fig.width=10}
+Plot the results of cellular RNA preprocessing for GEM well 1 and 2  
+
+```{r plot_preprocessing_output, fig.height=8, fig.width=10}
 (
   (cell_rna_library_1_filter_output$mtdna_plot + plot_spacer() + 
     cell_rna_library_1_filter_output$umi_feature_plot + 
@@ -320,47 +293,40 @@ ggsave(filename = paste(results_dir, "Figure S2.png", sep = ""),
        width = 9, height = 9, device = "png", dpi = 700)
 ```
 
-## Integrate the cells and SBO tags
+## Sample classification using SBO data
 
-### Import SBO libaries
+First we define a function to integrate the SBO with its cellular RNA data
 
-```{r}
-# import the SBO data from CITE-seq count
-# sbo_lib_1.data <- Read10X(data.dir = "../../CITE-seq_counts/SBO_library_1/SBO_library_1_counts/umi_count/",gene.column = 1)
-# sbo_lib_1.data <- sbo_lib_1.data[-6,]
-
-# sbo_lib_2.data <- Read10X(data.dir = "../../CITE-seq_counts/SBO_library_2/SBO_library_2_counts/umi_count/",gene.column = 1)
-# sbo_lib_2.data <- sbo_lib_2.data[-6,]
-
-```
-
-## Cell library 1
-
-```{r}
+```{r sbo_integration_fuction}
 sbo_integration <- function(object, sbo_matrix, library) {
-  
+
+# extract the RNA counts from the Seurat object
 seurat_count_matrix <- as.matrix(GetAssayData(object = object, 
                                                       slot = "counts"))
 
+# determine the cell barcodes shared between SBO and RNA
 joint_barcodes <- intersect(colnames(sbo_matrix), 
                                 colnames(seurat_count_matrix))
 
 print(paste(length(joint_barcodes) ,"barcodes matched between mRNA and SBO library"))
 
+# create a RNA count matrix containing only the shared barcodes
 matched_count_matrix <- seurat_count_matrix[, joint_barcodes]     
 
+# create a new Seurat object for the RNA counts 
 new_object <- CreateSeuratObject(
   counts = matched_count_matrix, 
   project = library
 )
 
+# set the percent mt for new object using the previous values
 new_object[["percent.mt"]] <- object$percent.mt[joint_barcodes]
 
+# add meta data for the library
 new_object@meta.data$library <- rep(library, dim(new_object)[2])
 
-# add a new assay to hold the SBO data
+# add a new assay to hold the SBO counts
 sbo_matrix <- as.matrix(sbo_matrix[, joint_barcodes]) # intersect
-
 
 new_object[["SBO"]] <- CreateAssayObject(counts = sbo_matrix)
 
@@ -368,29 +334,36 @@ return(new_object)
 }
 ```
 
-### Integrate
-
-```{r cell library 1 intergration, message=FALSE, warning=FALSE, include=FALSE}
+Integrate RNA and SBO counts for GEM well 1
+```{r integrate_sbo_1, warning=FALSE, message=FALSE}
 sbo_lib_1.data <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/sbo_lib_1.data.rds")
 
+# integrate
 cho_cell_sbo_lib_1 <- sbo_integration(cell_library_1, sbo_lib_1.data, "library 1")
+
+#summary
 cho_cell_sbo_lib_1
 
-# normalise SBO counts for classification
+# normalise SBO counts 
 cho_cell_sbo_lib_1 <- NormalizeData(cho_cell_sbo_lib_1, assay = "SBO", 
                                normalization.method = "CLR")
 ```
 
-```{r message=FALSE, warning=FALSE, include=FALSE}
+```{r ntegrate_sbo_2, message=FALSE, warning=FALSE}
 sbo_lib_2.data <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/sbo_lib_2.data.rds")
 
+# integrate
 cho_cell_sbo_lib_2 <- sbo_integration(cell_library_2, sbo_lib_2.data, "library 2")
+
+#summary
 cho_cell_sbo_lib_2
 
-# normalise SBO counts for classification
+# normalise SBO counts 
 cho_cell_sbo_lib_2<- NormalizeData(cho_cell_sbo_lib_2, assay = "SBO", 
                                normalization.method = "CLR")
 ```
+
+Next we need to 
 
 ```{r}
 cho.combined.sbo <- merge(cho_cell_sbo_lib_1,
