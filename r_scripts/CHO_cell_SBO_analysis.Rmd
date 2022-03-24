@@ -27,7 +27,8 @@ if (!dir.exists(results_dir)) {
 }
 ```
 
-# qPCR of TM treatment
+# qPCR 
+Prior to running single cell analysis, qPCR was carried was to confirm that the expression of 3 genes and a spliced isoform of XBP1 were upregulated 
 ```{r fig.height=2, fig.width=7}
 qpcr_data <- read_excel("../data/qpcr_analysis.xlsx")
 
@@ -168,7 +169,7 @@ knee_plot <- function(bc_rank) {
 ```
 
 
-## Filter cells
+### Filter cells
 ### Specify mitochondrial genes
 ```{r include=FALSE}
 mito <- c("ENSCGRG00000000006.1","ENSCGRG00000000010.1","ENSCGRG00000000016.1",
@@ -247,7 +248,9 @@ cell_library_1[["percent.mt"]] <- PercentageFeatureSet(cell_library_1, features 
 cell_rna_library_1_filter_output <- filter_cells(cell_library_1)
 
 cell_rna_library_1_filter_output$mtdna_plot
+
 cell_rna_library_1_filter_output$umi_feature_plot 
+
 cell_library_1 <- cell_rna_library_1_filter_output$filtered_object
 ```
 
@@ -260,10 +263,13 @@ cell_library_2[["percent.mt"]] <- PercentageFeatureSet(cell_library_2, features 
 cell_rna_library_2_filter_output <- filter_cells(cell_library_2)
 
 cell_rna_library_2_filter_output$mtdna_plot
+
 cell_rna_library_2_filter_output$umi_feature_plot 
+
 cell_library_2 <- cell_rna_library_2_filter_output$filtered_object
 ```
-# Integrate the cells and SBO tags
+## Integrate the cells and SBO tags  
+
 ### Import SBO libaries 
 ```{r}
 # import the SBO data from CITE-seq count
@@ -277,37 +283,49 @@ cell_library_2 <- cell_rna_library_2_filter_output$filtered_object
 
 
 ## Cell library 1
+
+```{r}
+sbo_integration <- function(object, sbo_matrix, library) {
+  
+seurat_count_matrix <- as.matrix(GetAssayData(object = object, 
+                                                      slot = "counts"))
+
+joint_barcodes <- intersect(colnames(sbo_matrix), 
+                                colnames(seurat_count_matrix))
+
+print(paste(length(joint_barcodes) ,"barcodes matched between mRNA and SBO library"))
+
+matched_count_matrix <- seurat_count_matrix[, joint_barcodes]     
+
+new_object <- CreateSeuratObject(
+  counts = matched_count_matrix, 
+  project = library
+)
+
+new_object[["percent.mt"]] <- object$percent.mt[joint_barcodes]
+
+new_object@meta.data$library <- rep(library, dim(new_object)[2])
+
+# add a new assay to hold the SBO data
+sbo_matrix <- as.matrix(sbo_matrix[, joint_barcodes]) # intersect
+
+
+new_object[["SBO"]] <- CreateAssayObject(counts = sbo_matrix)
+
+return(new_object)
+}
+```
+
+```{r}
+
+```
+
 ### Integrate
 ```{r cell library 1 intergration, message=FALSE, warning=FALSE, include=FALSE}
 sbo_lib_1.data <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/sbo_lib_1.data.rds")
 
-tagged_cells_seurat_matrix1 <- as.matrix(GetAssayData(object = cell_library_1, 
-                                                      slot = "counts"))
-
-# overlap the cell labels from the cellular and SBO libraries
-cho_lib1_joint_bcs <- intersect(colnames(sbo_lib_1.data), 
-                                colnames(tagged_cells_seurat_matrix1))
-
-paste(length(cho_lib1_joint_bcs) ," matched for mRNA and SBO library 1" )
-
-# retain the cells that overlap
-cho_cells_lib_1 <- tagged_cells_seurat_matrix1[, cho_lib1_joint_bcs]
-
-
-# create new seurat object
-cho_cell_sbo_lib_1 <- CreateSeuratObject(
-  counts = cho_cells_lib_1, 
-  project = "RNA library 1"
-)
-
-cho_cell_sbo_lib_1[["percent.mt"]] <- cell_library_1$percent.mt[cho_lib1_joint_bcs]
-
-cho_cell_sbo_lib_1@meta.data$library <- rep("library 1", dim(cho_cell_sbo_lib_1)[2])
-
-# add a new assay to hold the SBO data
-cho_lib_1_sbo <- as.matrix(sbo_lib_1.data[, cho_lib1_joint_bcs]) # intersect
-
-cho_cell_sbo_lib_1[["SBO"]] <- CreateAssayObject(counts = cho_lib_1_sbo)
+cho_cell_sbo_lib_1 <- sbo_integration(cell_library_1, sbo_lib_1.data, "library 1")
+cho_cell_sbo_lib_1
 ```
 
 ### Classify
@@ -359,35 +377,8 @@ cho_cell_sbo_lib_1.subset <- subset(cho_cell_sbo_lib_1, idents = "Negative", inv
 ```{r message=FALSE, warning=FALSE, include=FALSE}
 sbo_lib_2.data <- readRDS("~/GitHub/multiplexed_CHO_scrnaseq/data/new_rds/sbo_lib_2.data.rds")
 
-tagged_cells_seurat_matrix2 <- as.matrix(GetAssayData(object = cell_library_2, 
-                                                      slot = "counts"))
-
-#colnames(tagged_cells_seurat_matrix2) <- gsub("-1", "", colnames(tagged_cells_seurat_matrix2))
-
-# overlap the cell labels from the cellular and SBO libraries
-cho_lib2_joint_bcs <- intersect(colnames(sbo_lib_2.data), 
-                                colnames(tagged_cells_seurat_matrix2))
-
-paste(length(cho_lib2_joint_bcs) ," matched for mRNA and SBO library 2" )
-
-# retain the cells that overlap
-cho_cells_lib_2 <- tagged_cells_seurat_matrix2[, cho_lib2_joint_bcs]
-
-
-# create new seurat object
-cho_cell_sbo_lib_2 <- CreateSeuratObject(
-  counts = cho_cells_lib_2, 
-  project = "RNA library 2"
-)
-
-cho_cell_sbo_lib_2[["percent.mt"]] <- cell_library_2$percent.mt[cho_lib2_joint_bcs]
-
-cho_cell_sbo_lib_2@meta.data$library <- rep("library 2", dim(cho_cell_sbo_lib_2)[2])
-
-# add a new assay to hold the SBO data
-cho_lib_2_sbo <- as.matrix(sbo_lib_2.data[, cho_lib2_joint_bcs]) # intersect
-
-cho_cell_sbo_lib_2[["SBO"]] <- CreateAssayObject(counts = cho_lib_2_sbo)
+cho_cell_sbo_lib_2 <- sbo_integration(cell_library_2, sbo_lib_2.data, "library 2")
+cho_cell_sbo_lib_2
 ```
 
 ### Classify
@@ -421,7 +412,7 @@ eval_pq_lib2_plot <- eval_pq_lib2 %>%
   labs(y="# Cells", x="HTODemux positive quantile treshold", color="SBO identification", title="SBO library 2")
 
 cho_cell_sbo_lib_2 <- HTODemux(cho_cell_sbo_lib_2, assay = "SBO", 
-                          positive.quantile = 0.95)
+                          positive.quantile = 0.965)
 
 # show table
 table(cho_cell_sbo_lib_2$SBO_maxID, cho_cell_sbo_lib_2$SBO_classification.global)
@@ -550,6 +541,9 @@ ggsave(plot = sbo_classification_barplot, filename = paste(results_dir, "Figure 
 ```
 ### SBO classification by sample
 ```{r}
+table(cho.combined.sct$SBO_maxID, cho.combined.sct$SBO_classification.global)
+
+
 figure_s4 <- bind_rows(classification_library_1, classification_library_2) %>%
   mutate(ident = case_when(
     Var1 == "8-hours-untreated-CCGGACTT" ~ "TM- [CCGGACTT]",
@@ -581,28 +575,12 @@ cho_1.singlet <- subset(cho_cell_sbo_lib_1, idents = "Singlet")
 Idents(cho_cell_sbo_lib_2) <- "SBO_classification.global"
 cho_2.singlet <- subset(cho_cell_sbo_lib_2, idents = "Singlet")
 
-#
+# merge
 cho.combined.sct <- merge(cho_1.singlet,
   y = c(cho_2.singlet),
   add.cell.ids = c("lib1", "lib2"),
   project = "TM_analysis", merge.data = TRUE
 )
-
-
-# cho.combined.sct <- CellCycleScoring(
-#   cho.combined.sct,
-#   s.features = cgr_s_phase,
-#   g2m.features = cgr_g2m_phase,
-#   set.ident = TRUE
-# )
-
-# cho.combined.sct <- cho.combined.sct %>%
-#   NormalizeData() %>%
-#   FindVariableFeatures() %>%
-#   ScaleData(vars.to.regress = c("S.Score", "G2M.Score","nFeature_RNA", "percent.mt", "nCount_RNA"))
-  
-  
-
 
 table(cho.combined.sct$SBO_maxID, cho.combined.sct$SBO_classification.global)
 
@@ -610,7 +588,8 @@ cho.combined.sct <- SCTransform(
   cho.combined.sct,
   assay = "RNA",
   new.assay.name = "SCT",
-  vars.to.regress = c("nFeature_RNA"), variable.features.n = 4000
+  vars.to.regress = c("nFeature_RNA"), 
+  variable.features.n = 3000
 )
 
 # cell cycle genes
@@ -630,7 +609,7 @@ cho.combined.sct <- SCTransform(
   cho.combined.sct,
   assay = "RNA",
   new.assay.name = "SCT",
-  vars.to.regress = c("S.Score", "G2M.Score","nFeature_RNA"), variable.features.n = 4000,
+  vars.to.regress = c("S.Score", "G2M.Score","nFeature_RNA"), variable.features.n = 3000,
   verbose = TRUE
   
 )
@@ -730,7 +709,7 @@ figure_s6
 ggsave(plot = figure_s6, filename = paste(results_dir, "Figure S6.png", sep = ""), width = 6, height = 2, device = "png", dpi = 700)
 ```
 
-### Plot classified cells
+   ### Plot classified cells
 ```{r}
 sbo_tagged_cells_umap_plot <- DimPlot(cho.combined.sct, group.by = c("treatment"), combine = FALSE)
 
@@ -738,11 +717,11 @@ viridis_cp <- c("#fde725", "#5ec962", "#21918c", "#31688e", "#440154")
 
 figure_2e <- sbo_tagged_cells_umap_plot[[1]]$data %>%
   ggplot(aes(x = UMAP_1, y = UMAP_2, color = treatment)) +
-  geom_point(size = 0.4) +
+  geom_point(size = 0.3) +
   theme_bw() +
   coord_fixed() +
   #scale_x_reverse() +
-  #scale_color_brewer(palette = "Dark2",direction = 1) +
+  #scale_color_brewer(palette = "Set1") +
   scale_color_manual(values = viridis_cp) +
   labs(x = "UMAP 1", y = "UMAP 2", color = "Treatment", subtitle = "Classificaiton of cells by barcode") +
   guides(color = guide_legend(override.aes = list(size = 2))) +
@@ -924,7 +903,7 @@ for (group in unique(cho.combined.sct$treatment)) {
   cur_metacell_seurat <- scWGCNA::construct_metacells(
     cur_seurat,
     name = group,
-    k = 75,
+    k = 50,
     reduction = "umap",
     assay = "SCT", slot = "data"
   )
@@ -979,8 +958,6 @@ powerTable <- list(
   )[[2]]
 )
 
-
-
 figure_s8a <- powerTable$data %>%
   ggplot(aes(x=Power, y=SFT.R.sq)) +
   geom_point(size=0.1) +
@@ -1015,7 +992,7 @@ ggsave(plot = figure_s8, filename = paste(results_dir, "Figure S8.png", sep = ""
 ```
 ### Identify gene modules
 ```{r}
-softPower <- 8
+softPower <- 7
 
 nSets <- 1
 setLabels <- "treatment"
@@ -1044,7 +1021,7 @@ net <- blockwiseConsensusModules(multiExpr,
   pamStage = FALSE,
   detectCutHeight = 0.995, 
   minModuleSize = 50,
-  mergeCutHeight = 0.1,
+  mergeCutHeight = 0.3,
   saveConsensusTOMs = TRUE,
   consensusTOMFilePattern = "ConsensusTOM-block.%b.rda"
 )
@@ -1127,15 +1104,15 @@ ggsave(plot = wgcna_boxplot_full, filename = paste(results_dir, "Figure S9.png",
 ```
 
 
-```{r}
+```{r fig.height=4}
 wgcna_boxplot_filtered <- plot_df %>%
-  filter(variable %in% c("MEturquoise", "MEmagenta", "MEyellow")) %>%
-  mutate(new=factor(variable,labels=c("MEturquoise","MEmagenta","MEyellow"),  levels=c("MEturquoise","MEmagenta","MEyellow"))) %>%
+  filter(variable %in% c("MEblue", "MEmagenta", "MEyellow")) %>%
+  mutate(new=factor(variable,labels=c("MEblue","MEmagenta","MEyellow"),  levels=c("MEblue","MEmagenta","MEyellow"))) %>%
   ggplot(aes(x = orig.ident, y = value, fill = orig.ident)) +
   scale_fill_manual(values = c("#fde725", "#5ec962", "#21918c", "#31688e", "#440154")) +
   #geom_violin(draw_quantiles = T, width=0.4) +
   geom_boxplot(notch = T, alpha=0.5) + 
-  geom_jitter(size=0.1, alpha=0.3, color="grey") +
+  #geom_jitter(size=0.1, alpha=0.3, color="grey") +
   RotatedAxis() +
   ylab("Module Eigengene") +
   xlab("") +
@@ -1155,99 +1132,6 @@ ggsave(plot = wgcna_boxplot_filtered, filename = paste(results_dir, "Figure 3B.p
 ```
 
 ### Annotate WGCNA results
-```{r}
-CriGri_PICRH_1_0_annotation <- read_delim(paste0("../data/GCF_003668045.3_CriGri-PICRH-1.0_feature_table.txt"),
-  "\t",
-  escape_double = FALSE, trim_ws = TRUE
-)
-
-geneInfo_annotated <- geneInfo %>%
-  mutate(symbol = gsub("-.*", "", GeneSymbol)) %>%
-  left_join(CriGri_PICRH_1_0_annotation, by = "symbol") %>%
-  filter(`# feature` == "mRNA") %>%
-  mutate(name = gsub(",.*", "", name)) %>%
-  distinct(GeneSymbol, .keep_all = T) %>%
-  dplyr::select("symbol", "name", "GeneID", c(colnames(geneInfo)))
-
-
-pcg_without_loc_ids <- geneInfo_annotated %>%
-  filter(!str_detect(symbol, "LOC"))
-
-pcg_with_loc_ids <- geneInfo_annotated %>%
-  filter(str_detect(symbol, "LOC"))
-
-
-saveRDS(pcg_with_loc_ids, file="../data/pcg_with_loc_ids.rds")
-
-mouse_feature_table <- read_delim("../data/GCF_000001635.27_GRCm39_feature_table.txt",
-  delim = "\t", escape_double = FALSE,
-  trim_ws = TRUE
-)
-
-loc_id_gene_symbol <- mouse_feature_table %>%
-  mutate(ncbi_symbol = symbol) %>%
-  fuzzy_inner_join(pcg_with_loc_ids, by = "name", match_fun = str_detect) %>%
-  distinct(symbol.y, .keep_all = T)
-
-pcg_with_loc_ids <- pcg_with_loc_ids %>%
-  mutate("symbol.y" = symbol) %>%
-  left_join(loc_id_gene_symbol, by = "symbol.y") %>%
-  mutate(ncbi_symbol = coalesce(ncbi_symbol, symbol.y)) %>%
-  mutate(
-    "symbol" = ncbi_symbol,
-    "GeneSymbol" = GeneSymbol.x,
-    "Initially.Assigned.Module.Color" = Initially.Assigned.Module.Color.x,
-    "kMEyellow" = kMEyellow.x,
-    "kMEpurple" = kMEpurple.x,
-    "kMEblack" = kMEblack.x,
-    "kMEmagenta" = kMEyellow.x,
-    "kMEpink" = kMEpink.x,
-    "kMEturquoise" = kMEturquoise.x,
-    "kMEred" = kMEred.x,
-    "kMEgreen" = kMEgreen.x,
-    "kMEblue" = kMEblue.x,
-    "kMEbrown" = kMEbrown.x,
-    "kMEgrey" = kMEgrey.x
-  ) %>%
-  select(symbol, GeneSymbol, c(colnames(geneInfo_annotated)))
-
-geneInfo_annotated <- bind_rows(pcg_without_loc_ids, pcg_with_loc_ids)
-
-
-# save info
-write.csv(geneInfo_annotated, file = paste0(results_dir, "WGCNA_geneInfo_signed.csv"))
-```
-
-
-
-
-```{r}
-geneInfo %>%
-  filter(Initially.Assigned.Module.Color == "turquoise") %>%
-  arrange(-kMEturquoise) %>%
-  filter(GeneSymbol == "Hspa5-1")
-
-goi <- "Insig1-1"
-
-test_umap <- FeaturePlot(cho.combined.sct, features = c(goi))$data %>%
-  mutate(gene = "goi") %>%
-  rename(expression = "Insig1.1") %>%
-  ggplot(aes(x = UMAP_1, y = UMAP_2, color = expression)) +
-  geom_point(size = 0.1) +
-  scale_color_viridis(option = "turbo", direction = 1) +
-  theme_bw() +
-  coord_fixed() +
-  labs(x = "UMAP 2", y = "UMAP 1", color = "Hspa5 \nExpression \nlevel") +
-  theme(
-    plot.title = element_text(size = 10, face = "bold.italic"),
-    legend.position = "right",
-    legend.title = element_text(size = 8),
-    legend.text = element_text(size = 7)
-  )
-
-test_umap + figure_2e
-```
-
 
 ### Gene set enrichment analysis
 ```{r}
@@ -1310,7 +1194,7 @@ enrich_result <- WebGestaltRBatch(
 ```
 
 
-```{r fig.height=9, fig.width=10}
+```{r eval=FALSE, fig.height=9, fig.width=10, include=FALSE}
 blue_module_enrichment <- enrich_result[[2]]$enrichResult[, c(1, 2, 4, 5, 7, 8, 9, 11)] %>%
   mutate(type = "MEblue")
 
@@ -1348,7 +1232,7 @@ test <- wgcna_boxplot_filtered / enrichment_plots   + plot_layout(heights = c(1,
 ggsave(plot = test, filename = paste(results_dir, "Figure 3d.png", sep = ""), width = 10, height =6.5, device = "png", dpi = 700)
 ```
 
-```{r fig.width=4}
+```{r eval=FALSE, fig.width=4, include=FALSE}
 library(reshape2)
 library(sna)
 library(Hmisc)
@@ -1430,7 +1314,7 @@ a <- geneInfo_annotated$symbol[geneInfo_annotated$GeneSymbol %in% n$vertex.names
 
 ```
 
-```{r}
+```{r eval=FALSE, include=FALSE}
 geneInfo %>%
   filter(Initially.Assigned.Module.Color == "blue") %>%
   arrange(-kMEblue) %>%
@@ -1439,7 +1323,7 @@ geneInfo %>%
 
 
 
-```{r}
+```{r eval=FALSE, include=FALSE}
 
 uso1_umap <- FeaturePlot(cho.combined.sct, features = c("Uso1-1"))$data %>%
   mutate(gene = "Uso1") %>%
