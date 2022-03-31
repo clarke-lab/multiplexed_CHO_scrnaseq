@@ -9,7 +9,8 @@ Tzani *et. al* 2022. Found in translation: Microproteins are a new class of host
 | Software | R packages      ||
 | ------------- | --------------- | --------------- |
 
-## to be removed when made public
+## convert BCL to FASTQ
+
 ```
 # set the cell ranger path
 export PATH=/mnt/HDD2/colin/bin/cellranger-6.0.2:$PATH
@@ -23,7 +24,8 @@ cellranger mkfastq \
 --csv /mnt/HDD2/colin//multiplexed_CHO_scrnaseq/data/sbo_library_sample_sheet.csv
 ```
  
-# cat the sbo fastq files and rename
+## cat the sbo fastq files and rename
+
 ```
 mkdir -p raw_data/sbo_libraries
 cat fastq/outs/fastq_path/HCNVLDRXY/SBO_tag_library_1_S17_L001_R1_001.fastq.gz \
