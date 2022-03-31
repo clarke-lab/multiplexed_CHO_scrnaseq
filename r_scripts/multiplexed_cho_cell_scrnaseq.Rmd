@@ -1,0 +1,1789 @@
+---
+title: "Multiplexed CHO single cell RNA-seq"
+date: "`r Sys.Date()`"
+author: Clarke Lab. NIBRT
+output:
+  rmdformats::downcute:
+    self_contained: true
+    thumbnails: false
+    lightbox: true
+    gallery: true
+    highlight: tango
+---
+
+# Overview
+
+This R notebook enables the reproduction of the analysis described in:
+
+Tzani *et al.* Understanding the transcriptional response to ER stress in Chinese hamster ovary cells using multiplexed single cell RNA-seq (2022) [bioRxiv](bioRxivlink)
+
+In this study, we report the use of oligonucleotide barcoding to perform multiplexed CHO cell scRNA-seq to study the impact of tunicamycin (TM), an inducer of the unfolded protein response (UPR). For this experiment, we treated a CHO-K1 GS cell line with 10μg/ml tunicamycin and acquired samples at 1, 2, 4 and 8 hr post-treatment as well as a non-treated TM- control. We transfected cells from each sample with a distinct polyadenylated ssDNA oligonucleotide barcode before pooling all samples for scRNA-seq. 
+
+## Raw Data Availibility
+The FASTQ files for this study are available from the NCBI Sequence Read Archive ID: [PRJNA821033](SRAlink)     
+
+The associated github repository can be found [here](githublink)
+
+# Data Analysis
+
+## Prepare
+
+```{r preparation, results='hide'}
+
+#load packages
+package_list <- c(
+  "DropletUtils", "Matrix", "tidyverse", "readxl", "writexl", "scales", 
+  "ggridges", "WGCNA", "scWGCNA", "DT", "Seurat", "viridis", "WebGestaltR", 
+  "ggpubr", "patchwork", "scater","ggExtra", "SeuratWrappers", "langevitour", 
+  "biomaRt","RColorBrewer", "plyr"
+)
+invisible(lapply(package_list, require, character.only = TRUE))
+
+
+set.seed(38)
+
+# create a directory for the output
+results_dir <- "../results/"
+if (!dir.exists(results_dir)) {
+  dir.create(results_dir, recursive = TRUE)
+}
+```
+
+## qPCR analysis of gene expression
+
+Prior to conducting single cell analysis, qPCR was carried was to confirm that the expression of 3 genes and a spliced isoform of XBP1 were upregulated following tunicamycin addition. Here, we plot the fold changes for each treatment timepoint against the untreated control. 
+
+```{r qpcr, fig.cap="The upregulation of Atf4, Ddit3, Hspa5 and sXbp1 in comparison to the non-TM treated control sample observed via qPCR, confirmed the induction of the UPR"}
+qpcr_data <- read_excel("../data/qpcr_analysis.xlsx")
+
+qpcr_data <- qpcr_data %>%
+  pivot_longer(cols = c("Hspa5", "Ddit3", "Atf4", "sXbp1")) %>%
+  mutate(fold_change = signif(value, 2))
+
+# define color pa
+col_pal_vidiris <- c(
+  "#fde725", "#5ec962", "#21918c",
+  "#31688e", "#440154"
+)
+
+qpcr_data %>%
+  ggboxplot(
+    x = "Condition", y = "fold_change",
+    fill = "Condition", palette = col_pal_vidiris
+  ) +
+  geom_point(
+    data = qpcr_data, aes(x = Condition, y = fold_change),
+    position = position_jitter(width = 0),
+    size = 0.2, color = "grey"
+  ) +
+  labs(x = "", y = "Fold change") +
+  facet_wrap(~name, scales = "free_y", nrow = 2) +
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    strip.text.x = element_text(face = "italic"),
+    strip.background = element_blank(),
+    panel.spacing = unit(1, "lines"),
+    axis.text.x = element_text(angle = 35, vjust = 1, hjust = 1)
+  ) +
+  scale_y_continuous(breaks = pretty_breaks(n = 4, min.n = 0))
+
+ggsave(
+  filename = paste(results_dir, "Figure 1A.png", sep = ""),
+  width = 4, height = 4, device = "png", dpi = 700
+)
+```
+
+## Preprocess cellular RNA libraries 
+
+In this section we preprocess the counts for the CHO cell scRNA-seq data. We first remove empty droplets and then filter cells barcodes to remove data that may arise from damaged cells.  
+
+Load the cellular RNA data from GEM well 1 and GEM well 2. These data have already undergone filtering for empty droplets. 
+
+```{r load_rna_data}
+# GEM well 1 
+bc_rank1 <- readRDS("../data/rds_files/library1_bc_rank.rds")
+cell_library_1 <- readRDS("../data/rds_files/cellular_rna_lib1.rds")
+
+# GEM well 1
+bc_rank2 <- readRDS("../data/rds_files/library2_bc_rank.rds")
+cell_library_2 <- readRDS("../data/rds_files/cellular_rna_lib2.rds")
+```
+
+
+Show the knee plots illustrating filtering of empty droplets. Function was taken from from the Kallisto | Bustools [tutorial](<https://www.kallistobus.tools/tutorials/kb_getting_started/r/kb_intro_2_r/>)
+```{r knee_plot, fig.height=4, fig.width=8, fig.cap="Knee plots illustrating the removal of empty droplets for the cellular RNA data for (a) GEM well 1 and (b) GEM well 2 based on ranking the total UMI for counts per cellular barcode"}
+# function to construct the plot
+knee_plot <- function(bc_rank) {
+  knee_plt <- tibble(
+    rank = bc_rank[["rank"]],
+    total = bc_rank[["total"]]
+  ) %>%
+    distinct() %>%
+    dplyr::filter(total > 0)
+  annot <- tibble(
+    inflection = metadata(bc_rank)[["inflection"]],
+    rank_cutoff = max(bc_rank$rank[bc_rank$total > metadata(bc_rank)[["inflection"]]])
+  )
+  
+  p <- ggplot(knee_plt, aes(total, rank)) +
+    geom_line() +
+    geom_hline(aes(yintercept = rank_cutoff), data = annot, linetype = 2) +
+    geom_vline(aes(xintercept = inflection), data = annot, linetype = 2) +
+    scale_x_log10() +
+    scale_y_log10() +
+    annotation_logticks() +
+    labs(y = "Rank", x = "Total UMIs")
+  return(p)
+}
+
+# plot
+knee_plot_lib1 <- knee_plot(bc_rank1) + 
+  labs(title = "Cellular RNA library 1") + theme_bw()
+
+knee_plot_lib2 <- knee_plot(bc_rank2) + 
+  labs(title = "Cellular RNA library 2") + theme_bw()
+
+# join and tag
+knee_plot_lib1 + knee_plot_lib2 + plot_annotation(tag_levels = "a")
+
+# save
+ggsave(
+  filename = paste(results_dir, "Figure S2.png", sep = ""),
+  width = 8, height = 4, device = "png", dpi = 700
+)
+```
+Next, we create a function to filter cells from both libraries based on the number of UMIs mapping to mtDNA as well as the number of genes and UMIs detected. 
+```{r rna_filter_function}
+filter_cells <- function(object) {
+  
+  # run miQC
+  object <- RunMiQC(object,
+    percent.mt = "percent.mt",
+    nFeature_RNA = "nFeature_RNA",
+    posterior.cutoff = 0.9,
+    model.slot = "flexmix_model"
+  )
+  
+  # capture the plot
+  mtdna_plot <- PlotMiQC(object, color.by = "miQC.keep")
+  
+  # remove poor quality cells
+  object <- subset(object, subset = miQC.keep == "keep")
+  
+  # modify miQC output plot
+  mtdna_plot$layers[c(1, 2, 3)] <- NULL
+  mtdna_plot <- mtdna_plot + theme_bw() +
+    scale_color_manual(values = c("#888888", "#117733")) +
+    # scale_color_brewer(palette = "Dark2") +
+    geom_point(size = 0.2, alpha = 0.5) +
+    labs(x = "# Genes", y = "% mtDNA UMIs", color = "") +
+    guides(colour = guide_legend(override.aes = list(size = 5))) +
+    annotate("text", -Inf, Inf,
+      hjust = -1.70, vjust = 1.5, color = "#117733",
+      label = paste0(dim(object)[2], " cells retained")
+    ) +
+    theme(
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      legend.position = "bottom"
+    )
+
+  # thresholds for nUMI
+  log_umi_counts <- log10(object@meta.data$nCount_RNA)
+  low_count_threshold <- median(log_umi_counts) - (3 * mad(log_umi_counts))
+  high_count_threshold <- median(log_umi_counts) + (3 * mad(log_umi_counts))
+
+  # thresholds for detected genes
+  log_detect_genes <- log10(object@meta.data$nFeature_RNA)
+  low_feature_threshold <- median(log_detect_genes) - (3 * mad(log_detect_genes))
+  high_feature_threshold <- median(log_detect_genes) + (3 * mad(log_detect_genes))
+
+  # plot data for UMI and detected genes results
+  umi_v_feature_plot_data <- object@meta.data %>%
+    mutate(miQC.keep = case_when(
+      nFeature_RNA > 10^low_feature_threshold &
+        nFeature_RNA < 10^high_feature_threshold &
+        nCount_RNA > 10^low_count_threshold &
+        nCount_RNA < 10^high_count_threshold ~ "keep",
+      TRUE ~ "discard"
+    ))
+  
+  # filter cells
+  object <- subset(
+    object,
+    nFeature_RNA > 10^low_feature_threshold &
+      nFeature_RNA < 10^high_feature_threshold &
+      nCount_RNA > 10^low_count_threshold &
+      nCount_RNA < 10^high_count_threshold
+  )
+
+  # plot UMI and detected genes results
+  umi_v_feature_plot <- umi_v_feature_plot_data %>%
+    ggplot(aes(x = log10(nCount_RNA), y = log10(nFeature_RNA), color = miQC.keep)) +
+    geom_point(size = 0.2, alpha = 0.5) +
+    scale_color_manual(values = c("#888888", "#117733")) +
+    # geom_smooth(method = "lm") +
+    geom_hline(aes(yintercept = low_feature_threshold), colour = "grey", linetype = 2) +
+    geom_hline(aes(yintercept = high_feature_threshold), colour = "grey", linetype = 2) +
+    geom_vline(aes(xintercept = high_count_threshold), colour = "grey", linetype = 2) +
+    geom_vline(aes(xintercept = low_count_threshold), colour = "grey", linetype = 2) +
+    theme_bw() +
+    labs(x = "Log10 # UMIs", y = "Log10 # Genes", color = "") +
+    guides(colour = guide_legend(override.aes = list(size = 5))) +
+    annotate("text", -Inf, Inf,
+      hjust = -0.1, vjust = 1.5, color = "#117733",
+      label = paste0(dim(object)[2], " cells retained")
+    ) +
+    theme(
+      panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+      legend.position = "bottom"
+    )
+
+
+  # show the filtered cell summary
+  print(object)
+
+  # results list
+  result_list <- list(
+    "mtdna_plot" = mtdna_plot,
+    "filtered_object" = object,
+    "umi_feature_plot" = umi_v_feature_plot,
+    "umi_feature_plot_data" = umi_v_feature_plot_data
+  )
+
+  return(result_list)
+}
+```
+
+Specify the mitochondrial protein coding genes from the CHO-K1 genome
+```{r mito_gene_list}
+mito <- c("ENSCGRG00000000006.1","ENSCGRG00000000010.1","ENSCGRG00000000016.1",
+          "ENSCGRG00000000019.1","ENSCGRG00000000021.1","ENSCGRG00000000022.1",
+          "ENSCGRG00000000023.1","ENSCGRG00000000025.1","ENSCGRG00000000027.1",
+          "ENSCGRG00000000028.1","ENSCGRG00000000032.1","ENSCGRG00000000033.1",
+          "ENSCGRG00000000035.1")
+```
+
+Preprocess GEM well 1 RNA data.  
+
+```{r preprocess_rna_1, class.source="watch-out"}
+# determine the percentage mapping to mtDNA
+cell_library_1[["percent.mt"]] <- PercentageFeatureSet(cell_library_1, 
+                                                       features = mito)
+# preprocess
+cell_rna_library_1_filter_output <- filter_cells(cell_library_1)
+
+cell_library_1 <- cell_rna_library_1_filter_output$filtered_object
+```
+
+Preprocess GEM well 2 RNA data.. 
+
+```{r preprocess_rna_2, warning=FALSE}
+# determine the percentage mapping to mtDNA
+cell_library_2[["percent.mt"]] <- PercentageFeatureSet(cell_library_2, 
+                                                       features = mito)
+# preprocess
+cell_rna_library_2_filter_output <- filter_cells(cell_library_2)
+
+cell_library_2 <- cell_rna_library_2_filter_output$filtered_object
+```
+
+Plot the results of cellular RNA preprocessing for GEM well 1 and 2   
+
+```{r plot_preprocessing_output, fig.height=8, fig.width=10, fig.cap="miQC was used to assess the relationship between the number of UMIs originating from mtDNA and the number genes detected to identify low quality cells in the cellular RNA libraries from (a) GEM well 1 and (c) GEM well 2. If the number of UMIs or number of genes detected per cell was beyond 3 MAD of the median of the population of (b) GEM well 1 or (d) GEM well 2 those cells were also discarded."}
+(
+  (cell_rna_library_1_filter_output$mtdna_plot + plot_spacer() + 
+    cell_rna_library_1_filter_output$umi_feature_plot + 
+    plot_layout(widths = c(2,0.1,2))
+   ) 
+  / 
+(
+  cell_rna_library_2_filter_output$mtdna_plot + plot_spacer()  + 
+   cell_rna_library_2_filter_output$umi_feature_plot + 
+   plot_layout(widths = c(2,0.1,2))
+  )
+) + 
+  plot_annotation(tag_levels = "a") + plot_layout(guides = "collect") & theme(legend.position = "bottom")
+
+ggsave(filename = paste(results_dir, "Figure S3.png", sep = ""), 
+       width = 9, height = 9, device = "png", dpi = 700)
+```
+
+## Sample classification using SBO data
+
+First, we define a function to integrate the SBO with its cellular RNA data.  
+
+
+```{r sbo_integration_fuction}
+sbo_integration <- function(object, sbo_matrix, library) {
+
+  # extract the RNA counts from the Seurat object
+  seurat_count_matrix <- as.matrix(GetAssayData(
+    object = object,
+    slot = "counts"
+  ))
+
+  # determine the cell barcodes shared between SBO and RNA
+  joint_barcodes <- intersect(
+    colnames(sbo_matrix),
+    colnames(seurat_count_matrix)
+  )
+
+  print(paste(length(joint_barcodes), "barcodes matched between mRNA and SBO library"))
+
+  # create a RNA count matrix containing only the shared barcodes
+  matched_count_matrix <- seurat_count_matrix[, joint_barcodes]
+
+  # create a new Seurat object for the RNA counts
+  new_object <- CreateSeuratObject(
+    counts = matched_count_matrix,
+    project = library
+  )
+
+  # set the percent mt for new object using the previous values
+  new_object[["percent.mt"]] <- object$percent.mt[joint_barcodes]
+
+  # add meta data for the library
+  new_object@meta.data$library <- rep(library, dim(new_object)[2])
+
+  # add a new assay to hold the SBO counts
+  sbo_matrix <- as.matrix(sbo_matrix[, joint_barcodes]) # intersect
+
+  new_object[["SBO"]] <- CreateAssayObject(counts = sbo_matrix)
+
+  return(new_object)
+}
+```
+
+Integrate RNA and SBO counts for GEM well 1
+```{r integrate_sbo_1, warning=FALSE, message=FALSE}
+# load the SBO counts for GEM well 2
+sbo_lib_1_data <- readRDS("../data/rds_files/sbo_lib_1.data.rds")
+
+# integrate
+cho_cell_sbo_lib_1 <- sbo_integration(cell_library_1, sbo_lib_1_data, "library 1")
+
+#summary
+cho_cell_sbo_lib_1
+
+# normalise SBO counts 
+cho_cell_sbo_lib_1 <- NormalizeData(cho_cell_sbo_lib_1, assay = "SBO", 
+                               normalization.method = "CLR")
+```
+
+```{r ntegrate_sbo_2, message=FALSE, warning=FALSE}
+# load the SBO counts for GEM well 2
+sbo_lib_2_data <- readRDS("../data/rds_files/sbo_lib_2.data.rds")
+
+# integrate
+cho_cell_sbo_lib_2 <- sbo_integration(cell_library_2, sbo_lib_2_data, "library 2")
+
+#summary
+cho_cell_sbo_lib_2
+
+# normalise SBO counts 
+cho_cell_sbo_lib_2<- NormalizeData(cho_cell_sbo_lib_2, assay = "SBO", 
+                               normalization.method = "CLR")
+```
+
+Next, we need to determine a postive quartile threshold for SBO classification for the 2 GEM well libraries.  
+
+```{r evaluate_positive_quantile}
+eval_pq <- function(object, library_id) {
+  
+  eval_pq_out <- tibble()
+
+  for (i in seq(from = 0.9, to = 0.999999999, by = 0.005)) {
+    object <- HTODemux(object,
+      assay = "SBO",
+      positive.quantile = i,
+      verbose = F,
+      kfunc = "kmeans", init = 6
+    )
+
+    sbo_classification <- as.data.frame.matrix(table(
+      object$SBO_maxID,
+      object$SBO_classification.global
+    )) %>%
+      summarise(max.singlet = sum(Singlet)) %>%
+      mutate(threshold = i)
+
+    eval_pq_out <- bind_rows(eval_pq_out, sbo_classification) %>%
+      mutate(library = library_id)
+  }
+
+  eval_pq_plot <- eval_pq_out %>%
+    ggplot(aes(x = threshold, y = cells, fill = SBO_classification.global)) +
+    geom_bar(position = "fill", stat = "identity") +
+    theme_bw() +
+    scale_fill_viridis(discrete = T, direction = -1, option = "plasma") +
+    labs(y = "# Cells", x = "HTODemux positive quantile treshold", fill = "SBO identification", title = library_id)
+
+  result_list <- list(
+    "eval_pq_out" = eval_pq_out,
+    "eval_pq_plot" = eval_pq_plot
+  )
+
+  return(result_list)
+}
+```
+
+Here we select a balenced cutoff for both GEM wells to optimise the total number of singlet cells identified.   
+
+```{r evaluate_sbo_threshold, fig.height=5, fig.width=7, fig.cap="A range of positive quantile value from 0.9 to 0.999999 were assessed to identify a value for both GEM well 1 and GEM well 2 datasets. 0.94 was selected as the classification threshold to maximise the number of singlet cells."}
+eval_pq_lib1 <- eval_pq(cho_cell_sbo_lib_1, "GEM well 1")
+
+eval_pq_lib2 <- eval_pq(cho_cell_sbo_lib_2, "GEM well 2")
+
+bind_rows(eval_pq_lib1$eval_pq_out, eval_pq_lib2$eval_pq_out) %>%
+  ggplot(aes(x = threshold, y = max.singlet, fill = library, color = library)) +
+  geom_line() +
+  geom_point() +
+  geom_vline(xintercept = 0.94, linetype = 11, size = 0.5, color = "grey") +
+  geom_label(aes(x = 0.94, label = "HTODemux\nPostive Quantile\n= 0.94", y = 2550), inherit.aes = F, colour = "dark grey") +
+  scale_color_brewer(palette = "Dark2", direction = -1) +
+  labs(x = "Postive Quantile", y = "# Singlet cells", fill = "", color = "") +
+  theme_bw()
+
+ggsave(filename = paste(results_dir, "Figure S4.png", sep = ""), width = 6, height = 4, device = "png", dpi = 700)
+```
+
+Classify GEM well 1 samples.  
+
+```{r classify_rna_lib_1}
+# classify
+cho_cell_sbo_lib_1 <- HTODemux(cho_cell_sbo_lib_1,
+  assay = "SBO",
+  positive.quantile = 0.94, kfunc = "kmeans", init = 6
+)
+
+lib1_sbo_classification <- as.data.frame.matrix(
+  table(
+    cho_cell_sbo_lib_1$SBO_maxID,
+    cho_cell_sbo_lib_1$SBO_classification.global
+  )
+) %>%
+  as_tibble(rownames = "Sample") %>%
+  mutate(`Sample label` = case_when(
+    Sample == "control-CCGGACTT" ~ "TM-",
+    Sample == "1-hours-treated-GCTTGCCT" ~ "TM+ 1hr",
+    Sample == "2-hours-treated-GAACTCCC" ~ "TM+ 2hr",
+    Sample == "4-hours-treated-GTCAGGAT" ~ "TM+ 4hr",
+    Sample == "8-hours-treated-GTATATCC" ~ "TM+ 8hr"
+  )) %>%
+  dplyr::rename(`Sample ID` = Sample) %>%
+  dplyr::select(
+    `Sample ID`, `Sample label`,
+    `Doublet`, `Negative`, `Singlet`
+  ) %>%
+  arrange(`Sample label`)
+
+# output table
+lib1_sbo_classification %>%
+  DT::datatable()
+
+# capture data for merged classification plot
+classification_library_1 <- data.frame(table(
+  cho_cell_sbo_lib_1$SBO_maxID,
+  cho_cell_sbo_lib_1$SBO_classification.global
+)) %>%
+  mutate(library = "GEM well 1")
+
+# remove cells with no classified SBO
+rna_sbo_lib_1_subset <- subset(cho_cell_sbo_lib_1,
+  idents = "Negative", invert = T
+)
+```
+
+Classify GEM well 1 samples. 
+
+```{r classify_rna_lib_2}
+# classify
+cho_cell_sbo_lib_2 <- HTODemux(cho_cell_sbo_lib_2,
+  assay = "SBO",
+  positive.quantile = 0.94, kfunc = "kmeans", init = 6
+)
+
+
+lib2_sbo_classification <- as.data.frame.matrix(
+  table(
+    cho_cell_sbo_lib_2$SBO_maxID,
+    cho_cell_sbo_lib_2$SBO_classification.global
+  )
+) %>%
+  as_tibble(rownames = "Sample") %>%
+  mutate(`Sample label` = case_when(
+    Sample == "control-CCGGACTT" ~ "TM-",
+    Sample == "1-hours-treated-GCTTGCCT" ~ "TM+ 1hr",
+    Sample == "2-hours-treated-GAACTCCC" ~ "TM+ 2hr",
+    Sample == "4-hours-treated-GTCAGGAT" ~ "TM+ 4hr",
+    Sample == "8-hours-treated-GTATATCC" ~ "TM+ 8hr"
+  )) %>%
+  dplyr::rename(`Sample ID` = Sample) %>%
+  dplyr::select(
+    `Sample ID`, `Sample label`,
+    `Doublet`, `Negative`, `Singlet`
+  ) %>%
+  arrange(`Sample label`)
+
+lib2_sbo_classification %>%
+  DT::datatable()
+
+# capture data for merged classification plot
+classification_library_2 <- data.frame(
+  table(
+    cho_cell_sbo_lib_2$SBO_maxID,
+    cho_cell_sbo_lib_2$SBO_classification.global
+  )
+) %>%
+  mutate(library = "GEM well 2")
+
+# remove cells with no classified SBO
+rna_sbo_lib_2_subset <- subset(cho_cell_sbo_lib_2,
+  idents = "Negative", invert = T
+)
+```
+
+Summarise SBO classifications and write to file.  
+
+
+```{r classification_summary}
+combined_sbo_classification <- tibble(
+  `Sample ID` = lib1_sbo_classification$`Sample ID`,
+  `Sample label` = lib1_sbo_classification$`Sample label`,
+  Doublet = lib1_sbo_classification$Doublet + lib2_sbo_classification$Doublet,
+  Negative = lib1_sbo_classification$Negative + lib2_sbo_classification$Negative,
+  Singlet = lib1_sbo_classification$Singlet + lib2_sbo_classification$Singlet
+)
+
+combined_sbo_classification %>%
+  DT::datatable()
+
+# write supplementary table
+filename <- paste(results_dir, "Table S3.xlsx",
+  sep = ""
+)
+
+write_xlsx(list(
+  a = combined_sbo_classification,
+  b = lib1_sbo_classification,
+  c = lib2_sbo_classification
+),
+path = filename,
+format_headers = TRUE
+)
+```
+
+Combine the two GEM well libraries.  
+
+```{r combine_tagged_cells, message=FALSE, warning=FALSE}
+# merge non-negative cells
+rna_sbo_combined <- merge(rna_sbo_lib_1_subset,
+  y = c(rna_sbo_lib_2_subset),
+  add.cell.ids = c("lib1", "lib2"),
+  project = "TM_analysis", merge.data = TRUE
+)
+
+# summary
+rna_sbo_combined
+```
+
+Visualise the SBO counts using t-Stochastic neighbour embedding.  
+
+```{r plot_sbo_tsne, message=FALSE, warning=FALSE, fig.cap="t-Stochastic neighbour embedding (tSNE) dimensionality reduction and visualisation of the combined GEM well 1 and GEM well 2 UMI-SBO count matrices. HTODemux classifications are shown along with those cells identified as doublets.t-Stochastic neighbour embedding (tSNE) dimensionality reduction and visualisation of the combined GEM well 1 and GEM well 2 UMI-SBO count matrices. HTODemux classifications are shown along with those cells identified as doublets."}
+
+sbo_dist_mtx <- as.matrix(dist(t(GetAssayData(object = rna_sbo_combined, assay = "SBO"))))
+
+rna_sbo_combined <- RunTSNE(rna_sbo_combined, distance.matrix = sbo_dist_mtx, 
+                            perplexity = 100)
+
+sbo_combined_tsne_plot <- DimPlot(rna_sbo_combined)
+
+figure_2b <- sbo_combined_tsne_plot$data %>%
+  mutate(tag = case_when(
+    ident == "control-CCGGACTT" ~ "TM- [CCGGACTT]",
+    ident == "1-hours-treated-GCTTGCCT" ~ "TM+ 1hr [GCTTGCCT]",
+    ident == "2-hours-treated-GAACTCCC" ~ "TM+ 2hr [GAACTCCCT]",
+    ident == "4-hours-treated-GTCAGGAT" ~ "TM+ 4hr [GTCAGGAT]",
+    ident == "8-hours-treated-GTATATCC" ~ "TM+ 8hr [GTATATCC]",
+    ident == "Doublet" ~ "Doublet",
+  )) %>%
+  ggplot(aes(x = tSNE_1, y = tSNE_2, color = tag)) +
+  geom_point(size = 0.1) +
+  theme_bw() +
+  scale_color_manual(values = c("red", "#fde725", "#5ec962", "#21918c", "#31688e", "#440154")) +
+  labs(x = "tSNE 1", y = "tSNE 2", color = "Sample [barcode]") +
+  guides(color = guide_legend(override.aes = list(size = 2)))
+
+figure_2b
+ggsave(plot = figure_2b, filename = paste(results_dir, "Figure_S5.png", sep = ""), width = 6, height = 4, device = "png", dpi = 700)
+```
+
+Show overall sample classifications.  
+
+```{r plot_classification_supp, fig.height=5, fig.width=10, warning=TRUE, fig.cap="HTODemux with a positive quantile threshold = 0.94 was used to identify a total of (a) 2,645 and 2,669 singlets from GEM well 1 and GEM well 2 respectively. The (b,c) sample classifications across the 2 GEM wells were comparable. The number of singlet classifications are shown in white; the number of negative and doublet classifications are provided in Table S3. For the TM+ 4hr sample, a comparable number of SBO negative cells was observed for GEM well 1 (n = 141) and GEM well 2 (n = 190). While the origin of this variation is unknown these data indicate that the difference in detection rate of TM+ 4hr arose from the experimental steps conducted prior to cell isolation."}
+overall_classification_counts <- bind_rows(classification_library_1, classification_library_2) %>%
+  dplyr::rename("SBO_classification.global" = Var2) %>%
+   mutate(gem_well = case_when(library == "library 1" ~ "GEM well 1", 
+                              TRUE ~ "GEM well 2")) %>%
+  mutate(ident = case_when(
+    Var1 == "control-CCGGACTT" ~ "TM- [CCGGACTT]",
+    Var1 == "1-hours-treated-GCTTGCCT" ~ "TM+ 1hr [GCTTGCCT]",
+    Var1 == "2-hours-treated-GAACTCCC" ~ "TM+ 2hr [GAACTCCCT]",
+    Var1 == "4-hours-treated-GTCAGGAT" ~ "TM+ 4hr [GTCAGGAT]",
+    Var1 == "8-hours-treated-GTATATCC" ~ "TM+ 8hr [GTATATCC]",
+    Var1 == "Doublet" ~ "Doublet",
+  )) %>%
+dplyr::group_by(library, SBO_classification.global) %>%
+  dplyr::summarise(total_cells = sum(Freq))
+
+fig_s6_a <- overall_classification_counts  %>%
+  ggplot(aes(x = library, y = total_cells, fill = SBO_classification.global)) +
+  geom_bar(stat = "identity", position = "stack") +
+  geom_text(aes(x= library, y=3000, fill=SBO_classification.global, label=total_cells), 
+            data = overall_classification_counts  %>% filter(SBO_classification.global =="Singlet"), 
+            size = 3, position = position_stack(vjust = 0.5),
+            color="white") + 
+  labs(y = "# Cells", x = "", fill = "") +
+  theme_bw() +
+  theme(
+    legend.position = "right",
+    axis.text.x = element_text(angle = 35, vjust = 1, hjust = 1)
+  ) +
+  scale_fill_viridis(discrete = T, direction = -1, option = "plasma")
+
+
+
+gem_well_classification_counts <-bind_rows(classification_library_1, classification_library_2) %>%
+  dplyr::rename("SBO_classification.global" = Var2) %>%
+  mutate(ident = case_when(
+    Var1 == "control-CCGGACTT" ~ "TM- [CCGGACTT]",
+    Var1 == "1-hours-treated-GCTTGCCT" ~ "TM+ 1hr [GCTTGCCT]",
+    Var1 == "2-hours-treated-GAACTCCC" ~ "TM+ 2hr [GAACTCCCT]",
+    Var1 == "4-hours-treated-GTCAGGAT" ~ "TM+ 4hr [GTCAGGAT]",
+    Var1 == "8-hours-treated-GTATATCC" ~ "TM+ 8hr [GTATATCC]",
+    Var1 == "Doublet" ~ "Doublet",
+  ))
+  
+
+fig_s6_b <- gem_well_classification_counts  %>%
+  ggplot(aes(x=ident, y=Freq, fill=SBO_classification.global, label=Freq)) +
+  geom_bar(stat="identity",position = "stack", width = 0.75) +
+  geom_text(aes(x=ident, y=500, fill=SBO_classification.global, label=Freq), 
+            data = gem_well_classification_counts %>% filter(SBO_classification.global =="Singlet"), 
+            size = 3, position = position_stack(vjust = 0.5),
+            color="white") +
+  labs(x="", y="# Cells", fill="") +
+  facet_wrap(~library, nrow = 2) + 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 35, vjust = 1, hjust = 1), 
+        strip.background = element_blank()) +
+  scale_fill_viridis(discrete = T, direction = -1, option = "plasma")
+
+
+fig_s6_a + fig_s6_b + plot_annotation(tag_levels = "a") + 
+  plot_layout(guides = "collect", widths = c(0.4,1)) & 
+  theme(legend.position = "bottom")
+
+ggsave(filename = paste(results_dir, "Figure S6.png", sep = ""), 
+       width = 6, height = 5, device = "png", dpi = 700)
+```
+
+
+```{r combined_classification_count_plot, fig.cap="5,314 cells were confidently assigned to one of the 5 samples."}
+gem_lib_singlet_counts <- bind_rows(classification_library_1, classification_library_2) %>%
+  mutate(ident = case_when(
+    Var1 == "control-CCGGACTT" ~ "TM-",
+    Var1 == "1-hours-treated-GCTTGCCT" ~ "TM+ 1hr",
+    Var1 == "2-hours-treated-GAACTCCC" ~ "TM+ 2hr",
+    Var1 == "4-hours-treated-GTCAGGAT" ~ "TM+ 4hr",
+    Var1 == "8-hours-treated-GTATATCC" ~ "TM+ 8hr",
+    Var1 == "Doublet" ~ "Doublet",
+  )) %>%
+  dplyr::group_by(ident, Var2) %>%
+  dplyr::summarise(total_cells = sum(Freq))
+
+
+gem_lib_singlet_counts %>%
+  ggplot(aes(x=ident, y=total_cells, fill=Var2)) +
+  geom_bar(stat="identity",position = "stack", width = 0.75) +
+  geom_text(aes(x=ident, y=1000, label=total_cells), 
+            data = gem_lib_singlet_counts %>% 
+              filter(Var2 =="Singlet"), 
+            size = 3, 
+            position = position_stack(vjust = 0.5),
+            color="white") +
+  labs(x="", y="# Cells", fill="", title="SBO sample classification") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 35, vjust = 1, hjust = 1), legend.position = "bottom") +
+  scale_fill_viridis(discrete = T, direction = -1, option = "plasma")
+
+ggsave(filename = paste(results_dir, "Figure S4.png", sep = ""), width = 4, height = 3, device = "png", dpi = 700)
+```
+
+Select cells with only singlet identifications and merge the data
+
+```{r merge_gem_wells, message=FALSE, warning=FALSE}
+# select only singlet cells from both libraries
+Idents(cho_cell_sbo_lib_1) <- "SBO_classification.global"
+cho_1.singlet <- subset(cho_cell_sbo_lib_1, idents = "Singlet")
+  
+Idents(cho_cell_sbo_lib_2) <- "SBO_classification.global"
+cho_2.singlet <- subset(cho_cell_sbo_lib_2, idents = "Singlet")
+
+# merge
+classified_cells <- merge(cho_1.singlet,
+  y = c(cho_2.singlet),
+  add.cell.ids = c("lib1", "lib2"),
+  project = "TM_analysis", merge.data = TRUE
+)
+
+# total cells
+paste0(dim(classified_cells)[2], " cells with  sample classifications")
+```
+
+## Dimensionality reduction and visualisation
+
+```{r cell_cycle_classification, message=FALSE, warning=FALSE, include=FALSE}
+# run SCT and regress the effect of variation from the number of genes detected
+classified_cells <- SCTransform(
+  classified_cells,
+  assay = "RNA",
+  new.assay.name = "SCT",
+  vars.to.regress = c("nFeature_RNA"), 
+  variable.features.n = 3000
+)
+
+# load cell cycle gene annotations
+cgr_s_phase <- read.csv(file = "../data/s_ensembl_genelist.csv")$Gene.stable.ID
+cgr_g2m_phase <- read.csv(file = "../data/g2m_ensembl_genelist.csv")$Gene.stable.ID
+
+# classify CC phase 
+classified_cells <- CellCycleScoring(
+  classified_cells,
+  assay = "SCT",
+  s.features = cgr_s_phase,
+  g2m.features = cgr_g2m_phase,
+  set.ident = TRUE
+)
+```
+
+
+```{r sctransform, message=FALSE, warning=FALSE, include=FALSE}
+# regress the effect of CC and number of genes detected
+# note this is carried out on the RNA assay
+classified_cells <- SCTransform(
+  classified_cells,
+  assay = "RNA",
+  new.assay.name = "SCT",
+  vars.to.regress = c("S.Score", "G2M.Score","nFeature_RNA"), variable.features.n = 3000,
+  verbose = TRUE
+)
+
+# modify sample names
+sample_information <- classified_cells@meta.data %>%
+  mutate(treatment = case_when(
+    SBO_maxID == "control-CCGGACTT" ~ "TM-",
+    SBO_maxID == "1-hours-treated-GCTTGCCT" ~ "TM+ 1hr",
+    SBO_maxID == "2-hours-treated-GAACTCCC" ~ "TM+ 2hr",
+    SBO_maxID == "4-hours-treated-GTCAGGAT" ~ "TM+ 4hr",
+    SBO_maxID == "8-hours-treated-GTATATCC" ~ "TM+ 8hr",
+  ))
+
+classified_cells <- AddMetaData(classified_cells, metadata = sample_information$treatment, "treatment")
+```
+
+```{r fig.cap="The Seurat CellCycleScoring function was used to classify the phase of cell cycle for the 5,314 cells based on the expression of genes associated with the S phase and the G2M phase (a cell not classified in either phase is designated as G1). The proportion of cells predicted to be in each phase for each of the 5 samples is shown in white. The likelihood of each cell being either S or G2M is also outputted by the algorithm and was used to regress the effect of cell cycle from the data during SCTransform normalisation."}
+
+classified_cells@meta.data %>%
+  group_by(treatment, Phase) %>%
+  dplyr::summarise(n = n()) %>%
+  dplyr::mutate(freq = n / sum(n)) %>%
+  ggplot(aes(x = treatment, y = freq, fill = Phase)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_brewer(palette = "Dark2",direction = 1) +
+  geom_text(aes(label=paste0(sprintf("%1.1f", freq*100),"%")),
+                     position=position_stack(vjust=0.5), colour="white", size = 3) +
+  #scale_fill_manual(values = c("#CC6677", "#44AA99", "#88CCEE")) +
+  theme_bw() +
+  labs(x="",y = "Proportion of cells", fill = "Phase")
+
+ggsave(filename = paste(results_dir, "Figure S7.png", sep = ""), width = 5, height = 3, device = "png", dpi = 700)
+```
+
+Run principal components analysis
+
+```{r pca, fig.cap="Principal components analysis was performed on the SCTransform normalised gene expression data (cells = 5,314, genes = 3000). The first 20 principal components were retained for the UMAP visualisation."}
+classified_cells <- RunPCA(object = classified_cells, verbose = FALSE, npcs = 50,seed.use = 42)
+
+figure_s5 <- ElbowPlot(classified_cells,ndims = 50)
+
+figure_s5$data %>%
+  ggplot(aes(x=dims, y=stdev)) +
+  geom_line() + 
+  geom_point() +
+  geom_vline(xintercept = 20, linetype=11, size=0.2, color="red") +
+  theme_bw() +
+  labs(x="Principal components", y="Standard Deviation")
+
+ggsave(filename = paste(results_dir, "Figure S5.png", sep = ""), width = 5, height = 5, device = "png", dpi = 700)
+```
+
+Run UMAP
+
+```{r run_umap, fig.height=8, fig.width=5}
+classified_cells <- RunUMAP(object = classified_cells, 
+                            dims = 1:20)
+```
+
+
+```{r plot_lib_cc, fig.height=3, fig.width=5}
+### Supplementary Figure 6
+# overlay library
+seurat_dim_plot_lib <- DimPlot(classified_cells, reduction = "umap", group.by = c("library"), pt.size = 0.5)
+# overlay cell cycle phase
+seurat_dim_plot_cc <- DimPlot(classified_cells, reduction = "umap", group.by = c("Phase"), pt.size = 0.5)
+
+cbp1 <- c(
+  "#E69F00", "#009E73",
+  "#F0E442", "#0072B2", "#D55E00", "#CC79A7"
+)
+
+figure_s6a <- seurat_dim_plot_lib$data %>%
+   mutate(gem_well = case_when(library == "library 1" ~ "GEM well 1", 
+                              TRUE ~ "GEM well 2")) %>%
+  ggplot(aes(x = UMAP_1, y = UMAP_2, color = gem_well)) +
+  geom_point(size = 0.2) +
+  theme_bw() +
+  scale_color_manual(values = cbp1) +
+  labs(x = "UMAP 1", y = "UMAP 2", color = "") +
+  guides(color = guide_legend(override.aes = list(size = 2)))
+
+figure_s6b <- seurat_dim_plot_cc$data %>%
+  ggplot(aes(x = UMAP_1, y = UMAP_2, color = Phase)) +
+  geom_point(size = 0.2) +
+  theme_bw() +
+  scale_colour_brewer(palette = "Dark2",direction = 1) +
+  # scale_color_manual(values = cbp1) +
+  labs(x = "UMAP 1", y = "UMAP 2", color = "") +
+  guides(color = guide_legend(override.aes = list(size = 2)))
+
+
+(figure_s6a + plot_spacer() + figure_s6b) + plot_layout(widths =  c(4,0.2,4)) + plot_annotation(tag_levels = 'a') & theme(legend.position = "bottom")
+
+ggsave(filename = paste(results_dir, "Figure S6.png", sep = ""), 
+       width = 7, height = 4, device = "png", dpi = 700)
+```
+
+```{r fig.height=4, fig.width=5}
+sbo_tagged_cells_umap_plot <- DimPlot(classified_cells, group.by = c("treatment"), combine = FALSE)
+
+viridis_cp <- c("#fde725", "#5ec962", "#21918c", "#31688e", "#440154")
+
+tm_umap <- sbo_tagged_cells_umap_plot[[1]]$data %>%
+  ggplot(aes(x = UMAP_1, y = UMAP_2, color = treatment)) +
+  geom_point(size = 0.5) +
+  theme_bw() +
+  coord_fixed() +
+  #scale_color_brewer(palette = "Set1") +
+  scale_color_manual(values = viridis_cp) +
+  labs(x = "UMAP 1", y = "UMAP 2", color = "Treatment") +
+  guides(color = guide_legend(override.aes = list(size = 2))) +
+  theme(
+    plot.title = element_text(size = 10, face = "bold.italic"),
+    legend.position = "right",
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+  )
+tm_umap
+
+ggsave(plot= tm_umap, filename = paste(results_dir, "Figure 2d.png", sep = ""), width = 5, height = 4, device = "png", dpi = 700)
+```
+
+```{r fig.height=3, fig.width=3}
+classified_cells.3d <- RunUMAP(object = classified_cells, 
+                            dims = 1:30, n.components = 3)
+
+langevitour(as.data.frame(classified_cells.3d[["umap"]]@cell.embeddings), 
+            classified_cells$treatment, pointSize = 2)
+```
+
+Plot ER stress marker genes
+
+```{r er_marker_umap}
+hspa5_umap <- FeaturePlot(classified_cells, features = c("ENSCGRG00015003428.1"))$data %>%
+  mutate(gene = "Hspa5") %>%
+  dplyr::rename(expression = "ENSCGRG00015003428.1") %>%
+  ggplot(aes(x = UMAP_1, y = UMAP_2, color = expression)) +
+  geom_point(size = 0.01) +
+  scale_color_viridis(option = "turbo", direction = 1) +
+  theme_bw() +
+  coord_fixed() +
+  # scale_x_reverse() +
+  labs(x = "UMAP 2", y = "UMAP 1", color = "Hspa5 \nExpression \nlevel") +
+  theme(
+    plot.title = element_text(size = 10, face = "bold.italic"),
+    legend.position = "right",
+    legend.title = element_text(size = 8),
+    legend.text = element_text(size = 7)
+  )
+
+ddit3_umap <- FeaturePlot(classified_cells, features = c("ENSCGRG00015028401.1"))$data %>%
+  mutate(gene = "Ddit3") %>%
+  dplyr::rename(expression = "ENSCGRG00015028401.1") %>%
+  ggplot(aes(x = UMAP_1, y = UMAP_2, color = expression)) +
+  geom_point(size = 0.1) +
+  scale_color_viridis(option = "turbo") +
+  theme_bw() +
+  coord_fixed() +
+  # scale_x_reverse() +
+  labs(x = "UMAP 2", y = "UMAP 1", color = "Ddit3 \nExpression \nlevel") +
+  theme(
+    plot.title = element_text(size = 10, face = "bold.italic"),
+    legend.position = "right",
+    legend.title = element_text(size = 8),
+    legend.text = element_text(size = 7)
+  )
+
+atf4_umap <- FeaturePlot(classified_cells, features = c("ENSCGRG00015004082.1"))$data %>%
+  mutate(gene = "Atf4") %>%
+  dplyr::rename(expression = "ENSCGRG00015004082.1") %>%
+  ggplot(aes(x = UMAP_1, y = UMAP_2, color = expression)) +
+  geom_point(size = 0.1) +
+  scale_color_viridis(option = "turbo") +
+  theme_bw() +
+  coord_fixed() +
+  # scale_x_reverse() +
+  labs(x = "UMAP 2", y = "UMAP 1", color = "Atf4 \nExpression \nlevel") +
+  theme(
+    plot.title = element_text(size = 10, face = "bold.italic"),
+    legend.position = "right",
+    legend.title = element_text(size = 8),
+    legend.text = element_text(size = 7)
+  )
+```
+
+```{r er_marker_violin, fig.width=12}
+standard_normalisation <- NormalizeData(classified_cells,
+  normalization.method = "LogNormalize",
+  scale.factor = 10000, assay = "RNA"
+)
+
+hspa5_violin <- VlnPlot(standard_normalisation,
+  features = c("ENSCGRG00015003428.1"),
+  group.by = "treatment",
+  assay = "RNA"
+)$data %>%
+  mutate(gene = "Hspa5") %>%
+  dplyr::rename(expression = "ENSCGRG00015003428.1") %>%
+  ggplot(aes(x = ident, y = `expression`, fill = ident)) +
+  geom_violin() +
+  geom_jitter(size = 0.1, alpha = 0.1, color = "black") +
+  scale_fill_manual(values = c("#fde725", "#5ec962", 
+                               "#21918c", "#31688e", "#440154")) +
+  theme_bw() +
+  labs(x = "", y = "Expression Level", subtitle = "Hspa5") +
+  theme(
+    plot.subtitle = element_text(face = "italic"),
+    legend.position = "none",
+    strip.text.x = element_text(face = "bold.italic"),
+    strip.background = element_blank(),
+    panel.spacing = unit(2, "lines"),
+    axis.text.x = element_text(angle = 35, vjust = 1, hjust = 1)
+  ) +
+  scale_y_continuous(breaks = pretty_breaks(n = 4, min.n = 0))
+
+ddit3_violin <- VlnPlot(standard_normalisation, 
+                        features = c("ENSCGRG00015028401.1"), 
+                        group.by = "treatment", assay = "RNA")$data %>%
+  mutate(gene = "Ddit3") %>%
+  dplyr::rename(expression = "ENSCGRG00015028401.1") %>%
+  ggplot(aes(x = ident, y = `expression`, fill = ident)) +
+  geom_violin() +
+  geom_jitter(size = 0.1, alpha = 0.1) +
+  scale_fill_manual(values = c("#fde725", "#5ec962", 
+                               "#21918c", "#31688e", "#440154")) +
+  theme_bw() +
+  labs(x = "", y = "Expression Level", subtitle = "Ddit3") +
+  theme(
+    plot.subtitle = element_text(face = "italic"),
+    legend.position = "none",
+    strip.text.x = element_text(face = "bold.italic"),
+    strip.background = element_blank(),
+    axis.text.x = element_text(angle = 35, vjust = 1, hjust = 1)
+  ) +
+  scale_y_continuous(breaks = pretty_breaks(n = 4, min.n = 0))
+
+atf4_violin <- VlnPlot(standard_normalisation, 
+                       features = c("ENSCGRG00015004082.1"), 
+                       group.by = "treatment", assay = "RNA")$data %>%
+  mutate(gene = "Atf4") %>%
+  dplyr::rename(expression = "ENSCGRG00015004082.1") %>%
+  ggplot(aes(x = ident, y = `expression`, fill = ident)) +
+  geom_violin() +
+  geom_jitter(size = 0.1, alpha = 0.1) +
+  scale_fill_manual(values = c("#fde725", "#5ec962", 
+                               "#21918c", "#31688e", "#440154")) +
+  theme_bw() +
+  labs(x = "", y = "Expression Level", subtitle = "Atf4") +
+  theme(
+    plot.subtitle = element_text(face = "italic"),
+    legend.position = "none",
+    strip.text.x = element_text(face = "bold.italic"),
+    strip.background = element_blank(),
+    panel.spacing = unit(2, "lines"),
+    axis.text.x = element_text(angle = 35, vjust = 1, hjust = 1)
+  ) +
+  scale_y_continuous(breaks = pretty_breaks(n = 4, min.n = 0))
+
+```
+
+```{r}
+marker_gene_umap <- (((hspa5_violin / hspa5_umap + plot_layout(heights = c(0.8, 1)))) |
+  (atf4_violin / atf4_umap + plot_layout(heights = c(0.8, 1))) |
+  (ddit3_violin / ddit3_umap + plot_layout(heights = c(0.7, 1))))
+
+marker_gene_umap
+ggsave( filename = paste(results_dir, "Figure 2EFG.png", sep = ""), width = 9, height = 4.5, device = "png", dpi = 700)
+```
+
+## WGCNA
+
+```{r create_metacells}
+# WGCNA is performed for variable genes identified by SCTransform
+genes.keep <- VariableFeatures(classified_cells, assay = "SCT")
+
+# create metacells for each treatment
+seurat_list <- list()
+for (group in unique(classified_cells$treatment)) {
+  print(group)
+  cur_seurat <- subset(classified_cells, treatment == group)
+  cur_seurat <- cur_seurat[genes.keep, ]
+  cur_metacell_seurat <- scWGCNA::construct_metacells(
+    cur_seurat,
+    name = group,
+    k = 60,
+    reduction = "umap",
+    assay = "SCT", slot = "data"
+  )
+  seurat_list[[group]] <- cur_metacell_seurat
+}
+
+metacell_seurat <- merge(seurat_list[[1]], seurat_list[2:length(seurat_list)])
+
+# plot showing the number of metacells for each treatment
+metacell_counts <- metacell_seurat@meta.data %>%
+  ggplot(aes(orig.ident, fill=factor(orig.ident))) +
+  geom_bar(width = 0.75) +
+  geom_text(aes(label=..count..),
+            stat='count',
+            size = 3, 
+            position = position_stack(vjust = 1.07),
+            color="black") +
+  labs(x="", y="# Cells", fill="", title="") +
+  theme_bw() +
+  theme( legend.position = "none") +
+  scale_fill_manual(values = viridis_cp)  
+
+# umap for metacell data
+#scale data
+metacell_plot_data <- ScaleData(metacell_seurat, features = rownames(metacell_seurat))
+
+# PCA
+metacell_plot_data  <- RunPCA(metacell_plot_data , features=rownames(metacell_seurat))
+
+# UMAP
+metacell_plot_data  <- RunUMAP(metacell_plot_data , reduction='pca', dims=1:15)
+
+# plot
+metacell_umap <- DimPlot(metacell_plot_data ,  reduction='umap', label=TRUE)
+
+metacell_umap <- metacell_umap[[1]]$data %>%
+  ggplot(aes(x = UMAP_1, y = UMAP_2, color = ident)) +
+  geom_point(size = 0.1) +
+  theme_bw() +
+  coord_fixed() +
+  scale_color_manual(values = viridis_cp) +
+  labs(x = "UMAP 1", y = "UMAP 2", color = "", subtitle = "") +
+  guides(color = guide_legend(override.aes = list(size = 2))) +
+  theme(
+    plot.title = element_text(size = 10, face = "bold.italic"),
+    legend.position = "right",
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+  )
+
+metacell_counts + metacell_umap + plot_annotation(tag_levels = "a") + plot_layout(widths = c(2,1), heights = c(1,1)) 
+
+ggsave(filename = paste(results_dir, "Figure S10.png", sep = ""), width = 9, height = 5, device = "png", dpi = 700)
+
+```
+
+```{r find_soft_tresh}
+#nclusters <- length(unique(metacell_seurat$orig.ident))
+
+genes.use <- rownames(metacell_seurat)
+
+targets <- metacell_seurat@meta.data
+
+group <- as.factor(metacell_seurat$orig.ident)
+
+#create expression matrix
+datExpr <- as.data.frame(GetAssayData(metacell_seurat, assay = "RNA", slot = "data")[genes.use, ])
+
+# transpose
+datExpr <- as.data.frame(t(datExpr))
+
+datExpr <- datExpr[, goodGenes(datExpr)]
+
+# Choose a set of soft-thresholding powers
+powers <- c(seq(1, 10, by = 1), seq(12, 50, by = 2))
+
+# assess metrics over selected soft threshold range
+powerTable <- list(
+  data = pickSoftThreshold(
+    datExpr,
+    powerVector = powers,
+    verbose = 100,
+    networkType = "signed",
+    corFnc = "cor"
+  )[[2]]
+)
+
+# plot 
+figure_s11a <- powerTable$data %>%
+  ggplot(aes(x=Power, y=SFT.R.sq)) +
+  geom_point(size=0.1) +
+  labs(y="SFT fit", x="Power") +
+  geom_vline(xintercept = 7, linetype=11, size=0.2, color="red") +
+  theme_bw()
+  
+figure_s11b <- powerTable$data %>%
+  ggplot(aes(x=Power, y=mean.k.)) +
+  geom_point(size=0.1) +
+  labs(y="Mean connectivity", x="Power") +
+  geom_vline(xintercept = 7, linetype=11, size=0.2, color="red") +
+  theme_bw() 
+
+
+figure_s11a + figure_s11b +plot_annotation(tag_levels = "a")
+
+ggsave(filename = paste(results_dir, "Figure S11.png", sep = ""), width = 6, height = 2, device = "png", dpi = 700)
+```
+
+
+```{r run_wgcna}
+# selected soft threshold
+softPower <- 7
+
+nSets <- 1
+setLabels <- "treatment"
+shortLabels <- setLabels
+
+multiExpr <- list()
+multiExpr[["TM"]] <- list(data = datExpr)
+
+checkSets(multiExpr) # check data size
+
+# construct network
+net <- blockwiseConsensusModules(multiExpr,
+  blocks = NULL,
+  maxBlockSize = 30000, ## This should be set to a smaller size if the user has limited RAM
+  randomSeed = 12345,
+  corType = "pearson",
+  power = softPower,
+  consensusQuantile = 0.3,
+  networkType = "signed",
+  TOMType = "unsigned",
+  TOMDenom = "min",
+  scaleTOMs = TRUE, scaleQuantile = 0.8,
+  sampleForScaling = TRUE, sampleForScalingFactor = 1000,
+  useDiskCache = TRUE, chunkSize = NULL,
+  deepSplit = 4,
+  pamStage = FALSE,
+  detectCutHeight = 0.995,
+  minModuleSize = 50,
+  mergeCutHeight = 0.1,
+  saveConsensusTOMs = TRUE,
+  consensusTOMFilePattern = "ConsensusTOM-block.%b.rda"
+)
+
+consMEs <- net$multiMEs
+moduleLabels <- net$colors
+table(moduleLabels)
+
+# change the base colors to something better
+moduleLabels <- moduleLabels %>%
+  revalue(c(
+    blue = "#1F78B4",
+    brown = "#33A02C",
+    magenta = "#E31A1C",
+    yellow = "#FFFF99",
+    green = "#6A3D9A",
+    grey = "#D3D3D3",
+    pink = "#FF7F00",
+    red = "#B15928",
+    turquoise = "#3acabb"
+  ))
+
+# Convert the numeric labels to color labels
+moduleColors <- as.character(moduleLabels)
+length(unique(moduleColors))
+
+
+consTree <- net$dendrograms[[1]]
+
+# generatate module eigengenes
+MEs <- moduleEigengenes(multiExpr[[1]]$data, colors = moduleColors, nPC = 1)$eigengenes
+MEs <- orderMEs(MEs)
+meInfo <- data.frame(rownames(datExpr), MEs)
+colnames(meInfo)[1] <- "SampleID"
+
+# calculate intramodular connectivity
+KMEs <- signedKME(datExpr, MEs, outputColumnName = "kME", corFnc = "bicor")
+
+# compile into a module metadata table
+geneInfo <- as.data.frame(cbind(colnames(datExpr), moduleColors, KMEs))
+
+# how many modules did we get?
+nmodules <- length(unique(moduleColors))
+
+# merged gene symbol column
+colnames(geneInfo)[1] <- "GeneSymbol"
+colnames(geneInfo)[2] <- "Initially.Assigned.Module.Color"
+PCvalues <- MEs
+
+
+# save dendrogram figure
+png(file = paste(results_dir, "Figure_3A.png", sep = ""), units = "in", width = 6, height = 3, res = 700)
+
+plotDendroAndColors(consTree, moduleColors, "Module colors",
+  dendroLabels = FALSE, hang = 0.03, addGuide = TRUE, guideHang = 0.05,
+  main = paste0("")
+)
+
+dev.off()
+
+# show dendrogram figure
+plotDendroAndColors(consTree, moduleColors, "Module colors",
+  dendroLabels = FALSE, hang = 0.03, addGuide = TRUE, guideHang = 0.05,
+  main = paste0("")
+)
+
+# figure to show number of genes in each module
+
+# switch the colors back for plot
+num_gene_mod_counts <- moduleColors %>%
+  revalue(c(
+    "#1F78B4" = "blue",
+    "#33A02C" = "green",
+    "#E31A1C" = "red",
+    "#FFFF99" = "yellow",
+    "#6A3D9A" = "purple",
+    "#D3D3D3" = "grey",
+    "#FF7F00" = "orange",
+    "#B15928" = "brown",
+    "#3acabb" = "turquoise"
+  ))
+
+# plot
+data.frame(table(num_gene_mod_counts)) %>%
+  filter(num_gene_mod_counts != "grey") %>%
+  ggplot(aes(x = num_gene_mod_counts, y = Freq, label = Freq, fill = num_gene_mod_counts)) +
+  geom_bar(stat = "identity", colour = "grey") +
+  geom_label(
+    fill = "white",
+    size = 3,
+    # position = position_stack(vjust = 1.1),
+    color = "black"
+  ) +
+  theme_bw() +
+  labs(x = "", y = "# Coexpressed genes") +
+  theme(legend.position = "none") +
+  scale_fill_manual(values = c(
+    "black", "#1F78B4", "#B15928", "#33A02C", "#FF7F00", "#6A3D9A", "#E31A1C",
+    "#3acabb", "#FFFF99"
+  ))
+
+ggsave(
+  filename = paste(results_dir, "Figure 3B.png", sep = ""),
+  width = 5,
+  height = 3,
+  device = "png",
+  dpi = 700
+)
+```
+
+
+Now we annotate each of the 3,000 genes used for WGCNA analysis.
+
+```{r annotate_wgcna_genes}
+ensembl <- useEnsembl(
+  biomart = "ensembl",
+  dataset = "cgpicr_gene_ensembl",
+  version = "102"
+)
+
+biomart <- getBM(
+  attributes = c(
+    "ensembl_gene_id_version", "external_gene_name",
+    "description", "gene_biotype", "entrezgene_accession"
+  ),
+  filters = "ensembl_gene_id_version",
+  values = geneInfo$GeneSymbol,
+  mart = ensembl,
+  uniqueRows = T
+)
+
+# new data frame
+geneInfo_annotated <- geneInfo
+
+# switch colours back to names
+geneInfo_annotated$Initially.Assigned.Module.Color <- revalue(
+  geneInfo_annotated$Initially.Assigned.Module.Color,
+  c(
+    "#1F78B4" = "blue",
+    "#33A02C" = "green",
+    "#E31A1C" = "red",
+    "#FFFF99" = "yellow",
+    "#6A3D9A" = "purple",
+    "#D3D3D3" = "grey",
+    "#FF7F00" = "orange",
+    "#B15928" = "brown",
+    "#3acabb" = "turquoise"
+  )
+)
+
+new_colnames_colour_names <- revalue(
+  colnames(geneInfo_annotated),
+  c(
+    "kME#1F78B4" = "kMEblue",
+    "kME#33A02C" = "kMEgreen",
+    "kME#E31A1C" = "kMEred",
+    "kME#FFFF99" = "kMEyellow",
+    "kME#6A3D9A" = "kMEpurple",
+    "kME#D3D3D3" = "kMEgrey",
+    "kME#FF7F00" = "kMEorange",
+    "kME#B15928" = "kMEbrown",
+    "kME#3acabb" = "kMEturquoise"
+  )
+)
+
+# make the annotated gene information table
+colnames(geneInfo_annotated) <- new_colnames_colour_names
+
+geneInfo_annotated <- geneInfo_annotated %>%
+  dplyr::rename(
+    ensembl_gene_id_version = GeneSymbol,
+    module_color = Initially.Assigned.Module.Color
+  ) %>%
+  left_join(biomart, by = "ensembl_gene_id_version") %>% # add annotations
+  mutate_all(na_if, "") %>%
+  distinct(ensembl_gene_id_version, .keep_all = T) %>%
+  mutate(gene_symbol = coalesce(external_gene_name, 
+                                entrezgene_accession)) %>%
+  dplyr::select(c(-entrezgene_accession, 
+                  -external_gene_name)) %>%
+  dplyr::select(c(ensembl_gene_id_version, 
+                  gene_biotype, 
+                  gene_symbol, 
+                  description, 
+                  everything())) %>%
+  dplyr::arrange(module_color)
+
+
+
+
+
+filename <- paste(results_dir, "Table S4.xlsx",
+  sep = ""
+)
+
+write_xlsx(list(
+  a = geneInfo_annotated
+),
+path = filename,
+format_headers = TRUE
+)
+
+# show the WGCNA outs
+datatable(geneInfo_annotated, rownames = FALSE, filter="top", options = list(pageLength = 5, scrollX=T))
+```
+
+Plot the module eigengenes for each module against the sample IDs to assess correlations in expression. 
+
+```{r correlation_with_tm, fig.height=10, fig.width=8}
+plot_df <- cbind(dplyr::select(targets, c(orig.ident)), PCvalues)
+
+
+new_colnames_plot_df <- revalue(colnames(plot_df), 
+                           c("ME#1F78B4" = "MEblue",
+                             "ME#33A02C" = "MEgreen",
+                             "ME#E31A1C" = "MEred",
+                             "ME#FFFF99" = "MEyellow",
+                             "ME#6A3D9A" = "MEpurple",
+                             "ME#D3D3D3" = "MEgrey",
+                             "ME#FF7F00" = "MEorange",
+                             "ME#B15928" = "MEbrown",
+                             "ME#3acabb" = "MEturquoise"))
+
+colnames(plot_df) <- new_colnames_plot_df
+
+plot_df <- reshape2::melt(plot_df, id.vars = c("orig.ident"))
+
+plot_df$orig.ident <- factor(plot_df$orig.ident, 
+                             levels = c("TM-", "TM+ 1hr", "TM+ 2hr", "TM+ 4hr", "TM+ 8hr"))
+
+colors <- sub("ME", "", as.character(levels(plot_df$variable)))
+
+wgcna_boxplot_full <- plot_df %>%
+  filter(variable != "MEgrey") %>%
+  ggplot(aes(x = orig.ident, y = value, fill = orig.ident)) +
+  scale_fill_manual(values = c("#fde725", "#5ec962", "#21918c", "#31688e", "#440154")) +
+  geom_boxplot(alpha=0.5) +
+  RotatedAxis() +
+  ylab("Module Eigengene") +
+  xlab("") +
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    strip.text.x = element_text(face = "bold"),
+    strip.background = element_blank(),
+    axis.text.x = element_text(angle = 35, vjust = 1, hjust = 1)
+  ) +
+  facet_wrap(~variable, scales = "free", ncol = 3)
+
+wgcna_boxplot_full
+ggsave(plot = wgcna_boxplot_full, filename = paste(results_dir, "Figure S9.png", sep = ""), width = 9, height = 9, device = "png", dpi = 700)
+```
+
+The ME expression of the blue, green and red coexpression modules seem to be related to TM treatment over the time course. Let's see if any biological processes are enriched.  
+
+```{r enirchment_analysis}
+enrichdir <- paste0(results_dir, "/enrichment_analysis/")
+suppressMessages(if (file.exists(enrichdir)) {
+  unlink(enrichdir, recursive = T)
+})
+if (!dir.exists(enrichdir)) {
+  dir.create(enrichdir)
+}
+
+
+listGeneSet(organism = "mmusculus")
+
+selected_colors <- c("blue","green","red")
+
+for (color in selected_colors) {
+  current_genes <- geneInfo_annotated %>%
+    filter(module_color == color) %>%
+    dplyr::select(gene_symbol)
+
+  write(current_genes$gene_symbol, file = paste0(enrichdir, color, "_genes.txt"))
+}
+
+enrich_result <- WebGestaltRBatch(
+  enrichMethod = "ORA",
+  organism = "mmusculus",
+  enrichDatabase = c("geneontology_Biological_Process"),
+  enrichDatabaseType = "genesymbol",
+  interestGeneFolder = enrichdir,
+  interestGeneType = "genesymbol",
+  referenceSet = "genome",
+  minNum = 10,
+  maxNum = 500,
+  sigMethod = "fdr",
+  fdrMethod = "BH",
+  fdrThr = 0.05,
+  topThr = 10,
+  reportNum = 20,
+  perNum = 1000,
+  projectName = "SBO ER stress",
+  isOutput = TRUE,
+  outputDirectory = enrichdir,
+  dagColor = "continuous",
+  setCoverNum = 10,
+  networkConstructionMethod = NULL,
+  neighborNum = 10,
+  highlightType = "Seeds",
+  highlightSeedNum = 10,
+  nThreads = 32
+)
+
+filename <- paste(results_dir, "Table S5.xlsx",
+  sep = ""
+)
+
+write_xlsx(list(
+   a=enrich_result[[1]]$enrichResult[1:8, c(1, 2, 4, 5, 7, 8, 9, 11)],
+   b=enrich_result[[2]]$enrichResult[1:8, c(1, 2, 4, 5, 7, 8, 9, 11)],
+   c=enrich_result[[3]]$enrichResult[1:8, c(1, 2, 4, 5, 7, 8, 9, 11)]
+ ),
+ path = filename,
+ format_headers = TRUE
+ )
+```
+
+
+plot the ME and enrichment for blue module genes  
+```{r blue_module_plot,fig.height=3, fig.width=10}
+wgcna_boxplot_blue <- plot_df %>%
+  mutate(new_sample_label=case_when(
+    orig.ident == "TM-" ~ "TM-",
+    orig.ident == "TM+ 1hr" ~ "TM+\n1hr",
+    orig.ident == "TM+ 2hr" ~ "TM+\n2hr",
+    orig.ident == "TM+ 4hr" ~ "TM+\n4hr",
+    orig.ident == "TM+ 8hr" ~ "TM+\n8hr",
+    )) %>%
+  filter( variable == "MEblue") %>%
+  ggplot(aes(x = new_sample_label, y = value, fill = orig.ident)) +
+  scale_fill_manual(values = c("#fde725", "#5ec962", "#21918c", "#31688e", "#440154")) +
+  geom_boxplot(alpha=0.5) + 
+  labs(x="", y="Module Eigengene", title = "Blue Module") +
+  RotatedAxis() +
+  theme_bw() +
+  theme(
+    legend.position = "none"
+  ) 
+
+blue_module_enrichment_plot <- enrich_result[[1]]$enrichResult[1:8, c(1, 2, 4, 5, 7, 8, 9, 11)] %>%
+  mutate(type = "MEblue") %>%
+mutate(FDR = case_when(FDR == 0 ~ 2.2e-16, TRUE ~ FDR)) %>%
+  mutate(new_description = str_wrap(description, width = 50)) %>%
+  mutate(new_order = fct_reorder(new_description, FDR)) %>%
+  ggplot(aes(y = -log10(FDR), x =new_order, fill=type, label=overlap)) +
+  geom_bar(stat="identity", width = 0.75) +
+     scale_y_continuous(expand = c(0, 0), limits = c(0, -log10(2.2e-16)+ 0.05)) +
+  geom_text(aes(label = overlap), vjust = 0.5,hjust = 1.1, colour = "white") +
+  #scale_fill_viridis() +
+  theme_bw() +
+  labs(x = "",y = "-log10(FDR)", title = "GO Biological Process") +
+  scale_fill_manual(values = "#1F78B4") +
+  theme(strip.text.x = element_text(face = "bold"),strip.background = element_blank(), legend.position = "none",
+        axis.text.x = element_text( size = 6),
+        axis.text.y = element_text( size = 9),
+        panel.spacing = unit(2, "lines")) +
+    scale_x_discrete(limits=rev) +
+  coord_flip()
+
+fig3_cd <- wgcna_boxplot_blue + blue_module_enrichment_plot + plot_layout(widths=c(1,2.5))
+fig3_cd
+```
+
+```{r green_module_plot, fig.height=3, fig.width=10}
+wgcna_boxplot_green <- plot_df %>%
+  mutate(new_sample_label=case_when(
+    orig.ident == "TM-" ~ "TM-",
+    orig.ident == "TM+ 1hr" ~ "TM+\n1hr",
+    orig.ident == "TM+ 2hr" ~ "TM+\n2hr",
+    orig.ident == "TM+ 4hr" ~ "TM+\n4hr",
+    orig.ident == "TM+ 8hr" ~ "TM+\n8hr",
+    )) %>%
+  filter( variable == "MEgreen") %>%
+  ggplot(aes(x = new_sample_label, y = value, fill = orig.ident)) +
+  scale_fill_manual(values = c("#fde725", "#5ec962", "#21918c", "#31688e", "#440154")) +
+  geom_boxplot(alpha=0.5) + 
+  labs(x="", y="Module Eigengene", title = "Green Module") +
+  RotatedAxis() +
+  theme_bw() +
+  theme(
+    legend.position = "none"
+  ) 
+
+green_module_enrichment_plot <- enrich_result[[2]]$enrichResult[1:8, c(1, 2, 4, 5, 7, 8, 9, 11)] %>%
+  mutate(type = "MEgreen") %>%
+mutate(FDR = case_when(FDR == 0 ~ 2.2e-16, TRUE ~ FDR)) %>%
+  mutate(new_description = str_wrap(description, width = 50)) %>%
+  mutate(new_order = fct_reorder(new_description, FDR)) %>%
+  ggplot(aes(y = -log10(FDR), x =new_order, fill=type, label=overlap)) +
+  geom_bar(stat="identity", width = 0.75) +
+     scale_y_continuous(expand = c(0, 0), limits = c(0, -log10(1.012793e-08)+0.05)) +
+  geom_text(aes(label = overlap), vjust = 0.5,hjust = 1.1, colour = "white") +
+  #scale_fill_viridis() +
+  theme_bw() +
+  labs(x = "",y = "-log10(FDR)", title = "GO Biological Process") +
+  scale_fill_manual(values = "#33A02C") +
+  theme(strip.text.x = element_text(face = "bold"),strip.background = element_blank(), legend.position = "none",
+        axis.text.x = element_text( size = 6),
+        panel.spacing = unit(2, "lines")) +
+    scale_x_discrete(limits=rev) +
+  coord_flip()
+
+fig3_ef <- wgcna_boxplot_green + green_module_enrichment_plot + plot_layout(widths=c(1,2.5))
+fig3_ef
+```
+
+```{r red_module_plot, fig.height=3, fig.width=10}
+wgcna_boxplot_red <- plot_df %>%
+  mutate(new_sample_label=case_when(
+    orig.ident == "TM-" ~ "TM-",
+    orig.ident == "TM+ 1hr" ~ "TM+\n1hr",
+    orig.ident == "TM+ 2hr" ~ "TM+\n2hr",
+    orig.ident == "TM+ 4hr" ~ "TM+\n4hr",
+    orig.ident == "TM+ 8hr" ~ "TM+\n8hr",
+    )) %>%
+  filter( variable == "MEred") %>%
+  ggplot(aes(x = new_sample_label, y = value, fill = orig.ident)) +
+  scale_fill_manual(values = c("#fde725", "#5ec962", "#21918c", "#31688e", "#440154")) +
+  geom_boxplot(alpha=0.5) + 
+  labs(x="", y="Module Eigengene", title = "Red Module") +
+  RotatedAxis() +
+  theme_bw() +
+  theme(
+    legend.position = "none"
+  ) 
+
+red_module_enrichment_plot <- enrich_result[[3]]$enrichResult[1:8, c(1, 2, 4, 5, 7, 8, 9, 11)] %>%
+  mutate(type = "MEred") %>%
+mutate(FDR = case_when(FDR == 0 ~ 2.2e-16, TRUE ~ FDR)) %>%
+  mutate(new_description = str_wrap(description, width = 50)) %>%
+  mutate(new_order = fct_reorder(new_description, FDR)) %>%
+  ggplot(aes(y = -log10(FDR), x =new_order, fill=type, label=overlap)) +
+  geom_bar(stat="identity", width = 0.75) +
+     scale_y_continuous(expand = c(0, 0), limits = c(0, -log10(3.455569e-10)+0.05)) +
+  geom_text(aes(label = overlap), vjust = 0.5,hjust = 1.1, colour = "white") +
+  #scale_fill_viridis() +
+  theme_bw() +
+  labs(x = "",y = "-log10(FDR)", title = "GO Biological Process") +
+  scale_fill_manual(values = "#E31A1C") +
+  theme(strip.text.x = element_text(face = "bold"),strip.background = element_blank(), legend.position = "none",
+        axis.text.x = element_text( size = 6),
+        panel.spacing = unit(2, "lines")) +
+    scale_x_discrete(limits=rev) +
+  coord_flip()
+
+fig3_gh <- wgcna_boxplot_red + red_module_enrichment_plot + plot_layout(widths=c(1,2.5))
+fig3_gh
+```
+
+```{r manuscript_figure, fig.height=9.75, fig.width=10}
+fig3_cd / fig3_ef / fig3_gh
+
+ggsave(filename = paste(results_dir, "Figure 3CDEFGH.png", sep = ""), width = 10, height = 9.75, device = "png", dpi = 700)
+```
+
+```{r blue_module_umaps, fig.height=7, fig.width=9}
+selected_genes <-geneInfo_annotated %>%
+ # filter(gene_symbol %in% cell_cycle_phase_transition) %>%
+  arrange(-kMEblue) %>%
+  top_n(9, kMEblue)
+  
+for (i in 1:dim(selected_genes)[1]) {
+
+   umap_data <- FeaturePlot(classified_cells, features = selected_genes$ensembl_gene_id_version[i])$data %>%
+  mutate(gene = selected_genes$gene_symbol[i]) %>%
+   dplyr::rename(expression = selected_genes$ensembl_gene_id_version[i])
+ 
+umap_plot <- umap_data %>%
+  filter(gene == selected_genes$gene_symbol[i]) %>%
+  ggplot(aes(x = UMAP_1, y = UMAP_2, color = expression)) +
+  geom_point(size = 0.1) +
+  scale_color_viridis(option = "turbo") +
+  theme_bw() +
+  #scale_x_reverse() +
+  labs(x = "UMAP 2", y = "UMAP 1", color = paste0(selected_genes$gene_symbol[i],"\nExpression \nlevel"), 
+       title= selected_genes$gene_symbol[i], 
+       subtitle = paste0(" kMEblue = ", signif(selected_genes$kMEblue[i],digits = 3))) +
+  theme(
+    plot.title = element_text(face = "italic", size=12),
+    plot.subtitle = element_text(size=10),
+    legend.title = element_text(size=10)
+    ) 
+
+assign(paste0("fig_s13", LETTERS[i]), umap_plot)
+}
+
+(fig_s13A + fig_s13B + fig_s13C) / 
+  (fig_s13D + fig_s13E + fig_s13F) /
+    (fig_s13G + fig_s13H + fig_s13I) 
+
+ggsave(filename = paste(results_dir, "Figure S13.png", sep = ""), width = 9, height = 7, device = "png", dpi = 700)
+```
+
+```{r green_module_umaps, fig.height=7, fig.width=9}
+selected_genes <-geneInfo_annotated %>%
+ # filter(gene_symbol %in% cell_cycle_phase_transition) %>%
+  arrange(-kMEgreen) %>%
+  top_n(9, kMEgreen)
+  
+for (i in 1:dim(selected_genes)[1]) {
+
+   umap_data <- FeaturePlot(classified_cells, features = selected_genes$ensembl_gene_id_version[i])$data %>%
+  mutate(gene = selected_genes$gene_symbol[i]) %>%
+   dplyr::rename(expression = selected_genes$ensembl_gene_id_version[i])
+ 
+umap_plot <- umap_data %>%
+  filter(gene == selected_genes$gene_symbol[i]) %>%
+  ggplot(aes(x = UMAP_1, y = UMAP_2, color = expression)) +
+  geom_point(size = 0.1) +
+  scale_color_viridis(option = "turbo") +
+  theme_bw() +
+  #scale_x_reverse() +
+  labs(x = "UMAP 2", y = "UMAP 1", color = paste0(selected_genes$gene_symbol[i],"\nExpression \nlevel"), 
+       title= selected_genes$gene_symbol[i], 
+       subtitle = paste0(" kMEgreen = ", signif(selected_genes$kMEgreen[i],digits = 3))) +
+  theme(
+    plot.title = element_text(face = "italic", size=12),
+    plot.subtitle = element_text(size=10),
+    legend.title = element_text(size=10)
+    ) 
+
+assign(paste0("fig_s14", LETTERS[i]), umap_plot)
+}
+
+(fig_s14A + fig_s14B + fig_s14C) / 
+  (fig_s14D + fig_s14E + fig_s14F) /
+    (fig_s14G + fig_s14H + fig_s14I) 
+
+ggsave(filename = paste(results_dir, "Figure S14.png", sep = ""), width = 9, height = 7, device = "png", dpi = 700)
+```
+
+```{r red_module_umaps, fig.height=7, fig.width=9}
+selected_genes <-geneInfo_annotated %>%
+  #filter(gene_symbol %in% c("Hmgcs1","Hmgcr","Mvd","Pmvk","Fdft1","Msmo1", "Erg28", "Slc27a3", "Gamt")) %>%
+  filter(!is.na(gene_symbol)) %>%
+  arrange(-kMEred) %>%
+  top_n(9, kMEred)
+  
+for (i in 1:dim(selected_genes)[1]) {
+
+   umap_data <- FeaturePlot(classified_cells, features = selected_genes$ensembl_gene_id_version[i])$data %>%
+  mutate(gene = selected_genes$gene_symbol[i]) %>%
+   dplyr::rename(expression = selected_genes$ensembl_gene_id_version[i])
+ 
+umap_plot <- umap_data %>%
+  filter(gene == selected_genes$gene_symbol[i]) %>%
+  ggplot(aes(x = UMAP_1, y = UMAP_2, color = expression)) +
+  geom_point(size = 0.1) +
+  scale_color_viridis(option = "turbo") +
+  theme_bw() +
+  #scale_x_reverse() +
+  labs(x = "UMAP 2", y = "UMAP 1", color = paste0(selected_genes$gene_symbol[i],"\nExpression \nlevel"), 
+       title= selected_genes$gene_symbol[i], 
+       subtitle = paste0(" kMEred = ", signif(selected_genes$kMEred[i],digits = 3))) +
+  theme(
+    plot.title = element_text(face = "italic", size=12),
+    plot.subtitle = element_text(size=10),
+    legend.title = element_text(size=10)
+    ) 
+
+assign(paste0("fig_s15", LETTERS[i]), umap_plot)
+}
+
+(fig_s15A + fig_s15B + fig_s15C) / 
+  (fig_s15D + fig_s15E + fig_s15F) /
+    (fig_s15G + fig_s15H + fig_s15I) 
+
+ggsave(filename = paste(results_dir, "Figure S15.png", sep = ""), width = 9, height = 7, device = "png", dpi = 700)
+```
+
+```{r}
+geneInfo_annotated %>%
+  filter(module_color == "red") %>%
+  arrange(gene_symbol)
+```
+
+
+```{r show_session_info}
+sessionInfo()
+```
