@@ -2,7 +2,7 @@
 
 The code contained in this repositority enable the reproduction of the results of:
 
-Tzani *et. al* 2022. Found in translation: Microproteins are a new class of host cell impurity in mAb drug products
+Tzani *et. al* 2022. Understanding the transcriptional response to ER stress in Chinese hamster ovary cells using multiplexed single cell RNA-seq (2022) [bioRxiv](bioRxivlink)
 
 ## Dependancies
 
